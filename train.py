@@ -15,158 +15,198 @@ import numpy as np
 import random, sys
 from tqdm import trange
 
-dev = 'cuda' if torch.cuda.is_available() else 'cpu'
+from argparse import ArgumentParser
 
-edges, (n2i, i2n), (r2i, i2r), train, test = data.load('am', final=False)
+def go(arg):
+    dev = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-# Convert test and train to tensors
-train_idx = [n2i[name] for name, _ in train.items()]
-train_lbl = [cls for _, cls in train.items()]
-train_idx = torch.tensor(train_idx, dtype=torch.long, device=dev)
-train_lbl = torch.tensor(train_lbl, dtype=torch.long, device=dev)
+    edges, (n2i, i2n), (r2i, i2r), train, test = data.load(arg.name, final=arg.final)
 
-test_idx = [n2i[name] for name, _ in test.items()]
-test_lbl = [cls for _, cls in test.items()]
-test_idx = torch.tensor(test_idx, dtype=torch.long, device=dev)
-test_lbl = torch.tensor(test_lbl, dtype=torch.long, device=dev)
+    # Convert test and train to tensors
+    train_idx = [n2i[name] for name, _ in train.items()]
+    train_lbl = [cls for _, cls in train.items()]
+    train_idx = torch.tensor(train_idx, dtype=torch.long, device=dev)
+    train_lbl = torch.tensor(train_lbl, dtype=torch.long, device=dev)
 
-# count nr of classes
-cls = set([int(l) for l in test_lbl] + [int(l) for l in train_lbl])
+    test_idx = [n2i[name] for name, _ in test.items()]
+    test_lbl = [cls for _, cls in test.items()]
+    test_idx = torch.tensor(test_idx, dtype=torch.long, device=dev)
+    test_lbl = torch.tensor(test_lbl, dtype=torch.long, device=dev)
 
-"""
-Define model
-"""
-depth = 5
-k = 4
-num_cls = len(cls)
-epochs = 150
-lr = 0.001
+    # count nr of classes
+    cls = set([int(l) for l in test_lbl] + [int(l) for l in train_lbl])
 
-class GATLayer(nn.Module):
+    """
+    Define model
+    """
+    num_cls = len(cls)
 
-    def __init__(self, graph):
-        super().__init__()
+    class GATLayer(nn.Module):
 
-        self.i2n, self.i2r, self.edges = graph
+        def __init__(self, graph):
+            super().__init__()
 
-        froms, tos = [], []
+            self.i2n, self.i2r, self.edges = graph
 
-        for p in edges.keys():
-            froms.extend(edges[p][0])
-            tos.extend(edges[p][1])
+            froms, tos = [], []
 
-        self.register_buffer('froms', torch.tensor(froms, dtype=torch.long))
-        self.register_buffer('tos',  torch.tensor(tos, dtype=torch.long))
+            for p in edges.keys():
+                froms.extend(edges[p][0])
+                tos.extend(edges[p][1])
 
-    def forward(self, nodes, rels, sample=None):
+            self.register_buffer('froms', torch.tensor(froms, dtype=torch.long))
+            self.register_buffer('tos',  torch.tensor(tos, dtype=torch.long))
 
-        n, k = nodes.size()
-        k, k, r = rels.size()
+        def forward(self, nodes, rels, sample=None):
 
-        rels = [rels[None, :, :, p].expand(len(self.edges[p][0]), k, k) for p in range(r)]
-        rels = torch.cat(rels, dim=0)
+            n, k = nodes.size()
+            k, k, r = rels.size()
 
-        assert len(self.froms) == rels.size(0)
+            rels = [rels[None, :, :, p].expand(len(self.edges[p][0]), k, k) for p in range(r)]
+            rels = torch.cat(rels, dim=0)
 
-        froms = nodes[self.froms, :]
-        tos = nodes[self.tos, :]
+            assert len(self.froms) == rels.size(0)
 
-        froms, tos = froms[:, None, :], tos[:, :, None]
+            froms = nodes[self.froms, :]
+            tos = nodes[self.tos, :]
 
-        # unnormalized attention weights
-        att = torch.bmm(torch.bmm(froms, rels), tos).squeeze()
+            froms, tos = froms[:, None, :], tos[:, :, None]
 
-        if sample is None:
+            # unnormalized attention weights
+            att = torch.bmm(torch.bmm(froms, rels), tos).squeeze()
 
-            indices = torch.cat([self.froms[:, None], self.tos[:, None]], dim=1)
-            values = att
+            if sample is None:
 
-        else:
+                indices = torch.cat([self.froms[:, None], self.tos[:, None]], dim=1)
+                values = att
 
-            pass
+            else:
 
-        self.values = values
-        self.values.retain_grad()
+                pass
 
-        # normalize the values (TODO try sparsemax)
-        # values = util.absmax(indices, values, (n, n), row=True)
-        values = util.logsoftmax(indices, values, (n, n), p=10, row=True)
-        values = torch.exp(values)
+            self.values = values
+            self.values.retain_grad()
 
-       #  print(values[:20])
+            # normalize the values (TODO try sparsemax)
+            # values = util.absmax(indices, values, (n, n), row=True)
+            values = util.logsoftmax(indices, values, (n, n), p=10, row=True)
+            values = torch.exp(values)
 
-        mm = util.sparsemm(torch.cuda.is_available())
+           #  print(values[:20])
 
-        return mm(indices.t(), values, (n, n), nodes)
+            mm = util.sparsemm(torch.cuda.is_available())
 
-class Model(nn.Module):
+            return mm(indices.t(), values, (n, n), nodes)
 
-    def __init__(self, k, num_classes, graph, depth=3):
-        super().__init__()
+    class Model(nn.Module):
 
-        self.i2n, self.i2r, self.edges = graph
-        self.num_classes = num_classes
+        def __init__(self, k, num_classes, graph, depth=3):
+            super().__init__()
 
-        n = len(self.i2n)
+            self.i2n, self.i2r, self.edges = graph
+            self.num_classes = num_classes
 
-        # relation embeddings
-        self.rels = nn.Parameter(torch.randn(k, k, len(self.i2r) + 1)) # TODO initialize properly (like distmult?)
+            n = len(self.i2n)
 
-        # node embeddings (layer 0)
-        self.nodes = nn.Parameter(torch.randn(n, k)) # TODO initialize properly (like embedding?)
+            # relation embeddings
+            self.rels = nn.Parameter(torch.randn(k, k, len(self.i2r) + 1)) # TODO initialize properly (like distmult?)
 
-        self.layers = nn.ModuleList()
-        for _ in range(depth):
-            self.layers.append(GATLayer(graph))
+            # node embeddings (layer 0)
+            self.nodes = nn.Parameter(torch.randn(n, k)) # TODO initialize properly (like embedding?)
 
-        self.toclass = nn.Sequential(
-            nn.Linear(k, num_classes), nn.Softmax(dim=-1)
-        )
+            self.layers = nn.ModuleList()
+            for _ in range(depth):
+                self.layers.append(GATLayer(graph))
 
-    def forward(self, sample=None):
+            self.toclass = nn.Sequential(
+                nn.Linear(k, num_classes), nn.Softmax(dim=-1)
+            )
 
-        nodes = self.nodes
-        for layer in self.layers:
-            nodes = layer(nodes, self.rels, sample=sample)
+        def forward(self, sample=None):
 
-        return self.toclass(nodes)
+            nodes = self.nodes
+            for layer in self.layers:
+                nodes = layer(nodes, self.rels, sample=sample)
 
-model = Model(k=k, depth=depth, num_classes=num_cls, graph=(i2n, i2r, edges))
+            return self.toclass(nodes)
 
-if torch.cuda.is_available():
-    model.cuda()
-    train_lbl = train_lbl.cuda()
-    test_lbl  = test_lbl.cuda()
+    model = Model(k=arg.emb_size, depth=arg.depth, num_classes=num_cls, graph=(i2n, i2r, edges))
 
-opt = torch.optim.Adam(model.parameters(), lr=lr)
+    if torch.cuda.is_available():
+        model.cuda()
+        train_lbl = train_lbl.cuda()
+        test_lbl  = test_lbl.cuda()
 
-for e in range(epochs):
+    opt = torch.optim.Adam(model.parameters(), lr=arg.lr)
 
-    opt.zero_grad()
+    for e in range(arg.epochs):
 
-    cls = model()[train_idx, :]
+        opt.zero_grad()
 
-    loss = F.cross_entropy(cls, train_lbl)
-
-    loss.backward()
-    opt.step()
-
-    print(e, loss.item(), e)
-
-    # Evaluate
-    with torch.no_grad():
         cls = model()[train_idx, :]
-        agreement = cls.argmax(dim=1) == train_lbl
-        accuracy = float(agreement.sum()) / agreement.size(0)
 
-        print('   train accuracy ', float(accuracy))
+        loss = F.cross_entropy(cls, train_lbl)
 
-        cls = model()[test_idx, :]
-        agreement = cls.argmax(dim=1) == test_lbl
-        accuracy = float(agreement.sum()) / agreement.size(0)
+        loss.backward()
+        opt.step()
 
-        print('   test accuracy ', float(accuracy))
+        print(e, loss.item(), e)
 
-print('training finished.')
+        # Evaluate
+        with torch.no_grad():
+            cls = model()[train_idx, :]
+            agreement = cls.argmax(dim=1) == train_lbl
+            accuracy = float(agreement.sum()) / agreement.size(0)
 
+            print('   train accuracy ', float(accuracy))
+
+            cls = model()[test_idx, :]
+            agreement = cls.argmax(dim=1) == test_lbl
+            accuracy = float(agreement.sum()) / agreement.size(0)
+
+            print('   test accuracy ', float(accuracy))
+
+    print('training finished.')
+
+if __name__ == "__main__":
+
+    ## Parse the command line options
+    parser = ArgumentParser()
+
+    parser.add_argument("-e", "--epochs",
+                        dest="epochs",
+                        help="Size (nr of dimensions) of the input.",
+                        default=150, type=int)
+
+    parser.add_argument("-d", "--depth",
+                        dest="depth",
+                        help="Nr of attention layers.",
+                        default=4, type=int)
+
+    parser.add_argument("-E", "--embedding-size",
+                        dest="emb_size",
+                        help="Size (nr of dimensions) of the node embeddings.",
+                        default=16, type=int)
+
+    parser.add_argument("-l", "--learn-rate",
+                        dest="lr",
+                        help="Learning rate",
+                        default=0.001, type=float)
+
+    parser.add_argument("-D", "--dataset-name",
+                        dest="name",
+                        help="Name of dataset to use [aifb, am]",
+                        default='aifb', type=str)
+
+
+    parser.add_argument("-F", "--final", dest="final",
+                        help="Use the canonical test set instead of a validation split.",
+                        action="store_true")
+
+
+    options = parser.parse_args()
+
+    print('OPTIONS ', options)
+
+    go(options)
 
