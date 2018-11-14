@@ -139,7 +139,7 @@ def go(arg):
 
     opt = torch.optim.Adam(model.parameters(), lr=arg.lr)
 
-    for e in range(arg.epochs):
+    for e in tqdm.trange(arg.epochs):
 
         opt.zero_grad()
 
