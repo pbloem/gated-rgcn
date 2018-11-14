@@ -1,127 +1,168 @@
 import torch
 
 from torch import nn
-import torch.functional as F
+import torch.nn.functional as F
 from torch.autograd import Variable
+
+import util
+
+import data
 
 import rdflib as rdf
 import pandas as pd
 import numpy as np
 
-import gzip, random
+import random, sys
 from tqdm import trange
 
-def make_batch(i2n, i2r, nbs, train, batch_size=128, length=16):
-    """
-    Create a batch by performing random walks on the given graph
-    :param i2n:
-    :param i2r:
-    :param nbs:
-    :param batch_size:
-    :param length:
-    :return:
-    """
-    nodes = torch.LongTensor(batch_size, length)
-    rels  = torch.FloatTensor(batch_size, length, len(i2r))
-    dirs   = torch.FloatTensor(batch_size, length, 2)
+dev = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    target = torch.LongTensor(batch_size, length)
+edges, (n2i, i2n), (r2i, i2r), train, test = data.load('am', final=False)
 
-    rels.zero_()
-    dirs.zero_()
-
-    for b in range(batch_size):
-        node = random.randint(0, len(i2n))
-
-        for i in range(length):
-            node, rel, dr = random.choice(nbs[node])
-
-            nodes[b, i] = node
-            rels[b, i, rel] = 1 # one-hot
-            dirs[b, i, int(dr)] = 1
-
-    assert torch.max(nodes) <len(i2n)
-
-    return nodes, rels, dirs
-
-file = './data/aifb/aifb_stripped.nt.gz'
-
-graph = rdf.Graph()
-
-if file.endswith('nt.gz'):
-    with gzip.open(file, 'rb') as f:
-        graph.parse(file=f, format='nt')
-else:
-    graph.parse(file, format=rdf.util.guess_format(file))
-
-nodes = set()
-relations = set()
-
-for s, p, o in graph:
-    nodes.add(str(s))
-    nodes.add(str(o))
-    relations.add(str(p))
-
-i2n = list(nodes)
-n2i = { n:i for i, n in enumerate(i2n) }
-
-i2r = list(relations)
-r2i = {r:i for i, r in enumerate(i2r) }
-
-nbs = {}
-
-for s, p, o in graph:
-    s, p, o = n2i[str(s)], r2i[str(p)], n2i[str(o)]
-
-    if s not in nbs:
-        nbs[s] = []
-    if o not in nbs:
-        nbs[o] = []
-
-    nbs[s].append((o, p, True))
-    nbs[o].append((s, p, False))
-
-print('graph loaded.')
-
-train_file   = './data/aifb/trainingSet.tsv'
-test_file    = './data/aifb/testSet.tsv'
-label_header = 'label_affiliation'
-nodes_header = 'person'
-
-labels_train = pd.read_csv(train_file, sep='\t', encoding='utf8')
-labels_test = pd.read_csv(test_file, sep='\t', encoding='utf8')
-
-labels = labels_train[label_header].astype('category').cat.codes
-
-train = {}
-for nod, lab in zip(labels_train[nodes_header].values, labels):
-   print(nod, lab)
-   train[nod] = lab
-
-print('labels loaded.')
-
-k = 64
+"""
+Define model
+"""
+depth = 5
+k = 4
 num_cls = 5
+epochs = 150
+lr = 0.001
 
-emb = nn.Embedding(len(i2n), k)
-gru = nn.GRU(input_size=(k + len(i2r) + 2), hidden_size=k)
-den = nn.Linear(k, num_cls)
+class GATLayer(nn.Module):
 
-for _ in range(10):
-    nodes, rels, dirs, target = make_batch(i2n, i2r, nbs, train)
+    def __init__(self, graph):
+        super().__init__()
 
-    nodes, rels, dirs = Variable(rels), Variable(nodes), Variable(dirs)
+        self.i2n, self.i2r, self.edges = graph
 
-    # Model
-    emb_nodes = emb(nodes)
-    input = torch.cat([emb_nodes, rels, dirs], dim=2)
+        froms, tos = [], []
 
-    output = gru(input)
+        for p in edges.keys():
+            froms.extend(edges[p][0])
+            tos.extend(edges[p][1])
 
-    result = F.sigmoid(output + emb_nodes)
-    cls = F.softmax(den(result))
+        self.register_buffer('froms', torch.tensor(froms, dtype=torch.long))
+        self.register_buffer('tos',  torch.tensor(tos, dtype=torch.long))
 
-    loss = F.categorical_crossentropy(cls, target)
+    def forward(self, nodes, rels, sample=None):
 
+        n, k = nodes.size()
+        k, k, r = rels.size()
+
+        rels = [rels[None, :, :, p].expand(len(self.edges[p][0]), k, k) for p in range(r)]
+        rels = torch.cat(rels, dim=0)
+
+        assert len(self.froms) == rels.size(0)
+
+        froms = nodes[self.froms, :]
+        tos = nodes[self.tos, :]
+
+        froms, tos = froms[:, None, :], tos[:, :, None]
+
+        # unnormalized attention weights
+        att = torch.bmm(torch.bmm(froms, rels), tos).squeeze()
+
+        if sample is None:
+
+            indices = torch.cat([self.froms[:, None], self.tos[:, None]], dim=1)
+            values = att
+
+        else:
+
+            pass
+
+        self.values = values
+        self.values.retain_grad()
+
+        # normalize the values (TODO try sparsemax)
+        # values = util.absmax(indices, values, (n, n), row=True)
+        values = util.logsoftmax(indices, values, (n, n), p=10, row=True)
+        values = torch.exp(values)
+
+       #  print(values[:20])
+
+        mm = util.sparsemm(torch.cuda.is_available())
+
+        return mm(indices.t(), values, (n, n), nodes)
+
+class Model(nn.Module):
+
+    def __init__(self, k, num_classes, graph, depth=3):
+        super().__init__()
+
+        self.i2n, self.i2r, self.edges = graph
+        self.num_classes = num_classes
+
+        n = len(self.i2n)
+
+        # relation embeddings
+        self.rels = nn.Parameter(torch.randn(k, k, len(self.i2r) + 1)) # TODO initialize properly (like distmult?)
+
+        # node embeddings (layer 0)
+        self.nodes = nn.Parameter(torch.randn(n, k)) # TODO initialize properly (like embedding?)
+
+        self.layers = nn.ModuleList()
+        for _ in range(depth):
+            self.layers.append(GATLayer(graph))
+
+        self.toclass = nn.Sequential(
+            nn.Linear(k, num_classes), nn.Softmax(dim=-1)
+        )
+
+    def forward(self, sample=None):
+
+        nodes = self.nodes
+        for layer in self.layers:
+            nodes = layer(nodes, self.rels, sample=sample)
+
+        return self.toclass(nodes)
+
+model = Model(k=k, depth=depth, num_classes=num_cls, graph=(i2n, i2r, edges))
+
+opt = torch.optim.Adam(model.parameters(), lr=lr)
+
+# Train
+train_idx = [n2i[name] for name, _ in train.items()]
+train_lbl = [cls for _, cls in train.items()]
+train_idx = torch.tensor(train_idx, dtype=torch.long, device=dev)
+train_lbl = torch.tensor(train_lbl, dtype=torch.long, device=dev)
+
+test_idx = [n2i[name] for name, _ in test.items()]
+test_lbl = [cls for _, cls in test.items()]
+test_idx = torch.tensor(test_idx, dtype=torch.long, device=dev)
+test_lbl = torch.tensor(test_lbl, dtype=torch.long, device=dev)
+
+for e in range(epochs):
+
+    opt.zero_grad()
+
+    cls = model()[train_idx, :]
+
+    loss = F.cross_entropy(cls, train_lbl)
+
+    loss.backward()
+    opt.step()
+
+    # for l in model.layers:
+    #     print(l.values[:5])
+    #     print(l.values.grad[:5])
+
+    print(e, loss.item(), e)
+
+    # Evaluate
+    with torch.no_grad():
+        cls = model()[train_idx, :]
+        agreement = cls.argmax(dim=1) == train_lbl
+        accuracy = float(agreement.sum()) / agreement.size(0)
+
+        print('   train accuracy ', float(accuracy))
+
+        cls = model()[test_idx, :]
+        agreement = cls.argmax(dim=1) == test_lbl
+        accuracy = float(agreement.sum()) / agreement.size(0)
+
+        print('   test accuracy ', float(accuracy))
+
+print('training finished.')
 
 
