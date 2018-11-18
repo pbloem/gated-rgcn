@@ -3,11 +3,13 @@ import torch
 import rdflib as rdf
 import pandas as pd
 import gzip, random, sys, os, wget, pickle, tqdm
+from collections import Counter
 import util
 
 VALPROP = 0.4
+REST = '.rest'
 
-def load(name, final=False):
+def load(name, final=False, limit=None):
     """
 
     :param name:
@@ -15,13 +17,14 @@ def load(name, final=False):
     :return:
     """
     cachefile = 'data' + os.sep + name + os.sep + 'cache.pkl'
-    if os.path.isfile(cachefile):
+    if os.path.isfile(cachefile) and limit is None:
         print('Using cached data.')
         with open(cachefile, 'rb') as file:
             data = pickle.load(file)
             print('Loaded.')
             return data
-    print('No cache, loading data.')
+    print('No cache (or relation limit set), loading data.')
+
     if name == 'aifb':
         file = './data/aifb/aifb_stripped.nt.gz'
         train_file = './data/aifb/trainingSet.tsv'
@@ -54,23 +57,28 @@ def load(name, final=False):
     print('RDF loaded.')
 
     nodes = set()
-    relations = set()
+    relations = Counter()
 
     for s, p, o in graph:
         nodes.add(str(s))
         nodes.add(str(o))
-        relations.add(str(p))
+        relations[str(p)] += 1
+
+    if limit is not None:
+        i2r = list(relations.most_common(limit)) + [REST]
+    else:
+        i2r = list(relations.items())
+
+    r2i = {r: i for i, r in enumerate(i2r)}
 
     i2n = list(nodes)
-    n2i = { n:i for i, n in enumerate(i2n) }
-
-    i2r = list(relations)
-    r2i = {r:i for i, r in enumerate(i2r) }
+    n2i = {n:i for i, n in enumerate(i2n)}
 
     edges = {}
 
     for s, p, o in tqdm.tqdm(graph):
-        s, p, o = n2i[str(s)], r2i[str(p)], n2i[str(o)]
+        s, p, o = n2i[str(s)], str(p), n2i[str(o)]
+        p = r2i[p] if p in r2i else r2i[REST]
 
         if p not in edges:
             edges[p] = [], []

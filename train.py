@@ -12,7 +12,7 @@ import rdflib as rdf
 import pandas as pd
 import numpy as np
 
-import random, sys
+import random, sys, tqdm
 from tqdm import trange
 
 from argparse import ArgumentParser
@@ -20,7 +20,7 @@ from argparse import ArgumentParser
 def go(arg):
     dev = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    edges, (n2i, i2n), (r2i, i2r), train, test = data.load(arg.name, final=arg.final)
+    edges, (n2i, i2n), (r2i, i2r), train, test = data.load(arg.name, final=arg.final, limit=arg.limit)
 
     # Convert test and train to tensors
     train_idx = [n2i[name] for name, _ in train.items()]
@@ -62,41 +62,57 @@ def go(arg):
             n, k = nodes.size()
             k, k, r = rels.size()
 
-            rels = [rels[None, :, :, p].expand(len(self.edges[p][0]), k, k) for p in range(r)]
-            rels = torch.cat(rels, dim=0)
+            if arg.dense:
 
-            assert len(self.froms) == rels.size(0)
+                froms = nodes[None, :, :].expand(r, n, k)
+                rels = rels.permute(2, 0, 1)
 
-            froms = nodes[self.froms, :]
-            tos = nodes[self.tos, :]
+                froms = torch.bmm(froms, rels)
 
-            froms, tos = froms[:, None, :], tos[:, :, None]
+                froms = froms.view(r*n, k)
+                adj = torch.mm(froms, nodes.t()) # stacked adjacencies
+                adj = F.softmax(adj, dim=0)
 
-            # unnormalized attention weights
-            att = torch.bmm(torch.bmm(froms, rels), tos).squeeze()
+                nwnodes = torch.mm(adj, nodes)
+                nwnodes = nwnodes.view(r, n, k)
+                nwnodes = nwnodes.mean(dim=0)
 
-            if sample is None:
-
-                indices = torch.cat([self.froms[:, None], self.tos[:, None]], dim=1)
-                values = att
+                return nwnodes
 
             else:
+                rels = [rels[None, :, :, p].expand(len(self.edges[p][0]), k, k) for p in range(r)]
+                rels = torch.cat(rels, dim=0)
 
-                pass
+                assert len(self.froms) == rels.size(0)
 
-            self.values = values
-            self.values.retain_grad()
+                froms = nodes[self.froms, :]
+                tos = nodes[self.tos, :]
 
-            # normalize the values (TODO try sparsemax)
-            # values = util.absmax(indices, values, (n, n), row=True)
-            values = util.logsoftmax(indices, values, (n, n), p=10, row=True)
-            values = torch.exp(values)
+                froms, tos = froms[:, None, :], tos[:, :, None]
 
-           #  print(values[:20])
+                # unnormalized attention weights
+                att = torch.bmm(torch.bmm(froms, rels), tos).squeeze()
 
-            mm = util.sparsemm(torch.cuda.is_available())
+                if sample is None:
 
-            return mm(indices.t(), values, (n, n), nodes)
+                    indices = torch.cat([self.froms[:, None], self.tos[:, None]], dim=1)
+                    values = att
+
+                else:
+
+                    pass
+
+                self.values = values
+                self.values.retain_grad()
+
+                # normalize the values (TODO try sparsemax)
+
+                values = util.logsoftmax(indices, values, (n, n), p=10, row=True)
+                values = torch.exp(values)
+
+                mm = util.sparsemm(torch.cuda.is_available())
+
+                return mm(indices.t(), values, (n, n), nodes)
 
     class Model(nn.Module):
 
@@ -198,11 +214,19 @@ if __name__ == "__main__":
                         help="Name of dataset to use [aifb, am]",
                         default='aifb', type=str)
 
-
     parser.add_argument("-F", "--final", dest="final",
                         help="Use the canonical test set instead of a validation split.",
                         action="store_true")
 
+    parser.add_argument("--dense", dest="dense",
+                        help="Use a dense adjacency matrix with the canonical softmax.",
+                        action="store_true")
+
+
+    parser.add_argument("--limit",
+                        dest="limit",
+                        help="Limit the number of relations.",
+                        default=None, type=int)
 
     options = parser.parse_args()
 
