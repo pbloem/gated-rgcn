@@ -11,11 +11,15 @@ REST = '.rest'
 
 def load(name, final=False, limit=None):
     """
+    Loads a knowledge graph dataset. Self connections are automatically added as a special connection
 
-    :param name:
+    :param name: Dataset name ('aifb' or 'am' at the moment)
     :param final: If true, load the canonical test set, otherwise split a validation set off from the training data.
-    :return:
+    :param limit: If set, the number of unique relations will be limited to this value, plus one for the self-connections,
+                  plus one for the remaining connections combined into a single, new relation.
+    :return: A tuyple containing the graph data, and the classification test and train sets.
     """
+    # -- Check if the data has been cached for quick loading.
     cachefile = 'data' + os.sep + name + os.sep + 'cache.pkl'
     if os.path.isfile(cachefile) and limit is None:
         print('Using cached data.')
@@ -26,6 +30,7 @@ def load(name, final=False, limit=None):
     print('No cache (or relation limit set), loading data.')
 
     if name == 'aifb':
+        # AIFB data (academics, affiliations, publications, etc. About 8k nodes)
         file = './data/aifb/aifb_stripped.nt.gz'
         train_file = './data/aifb/trainingSet.tsv'
         test_file = './data/aifb/testSet.tsv'
@@ -33,6 +38,7 @@ def load(name, final=False, limit=None):
         nodes_header = 'person'
 
     if name == 'am':
+        # Collection of the Amsterdam Museum. Data is downloaded on first load.
         data_url = 'https://www.dropbox.com/s/1mp9aot4d9j01h9/am_stripped.nt.gz?dl=1'
         file = 'data/am/am_stripped.nt.gz'
 
@@ -46,6 +52,7 @@ def load(name, final=False, limit=None):
         label_header = 'label_cateogory'
         nodes_header = 'proxy'
 
+    # -- Parse the data with RDFLib
     graph = rdf.Graph()
 
     if file.endswith('nt.gz'):
@@ -56,6 +63,7 @@ def load(name, final=False, limit=None):
 
     print('RDF loaded.')
 
+    # -- Collect all node and relation labels
     nodes = set()
     relations = Counter()
 
@@ -64,18 +72,21 @@ def load(name, final=False, limit=None):
         nodes.add(str(o))
         relations[str(p)] += 1
 
+    i2n = list(nodes) # maps indices to labels
+    n2i = {n:i for i, n in enumerate(i2n)} # maps labels to indices
+
+    # Truncate the list of relations if necessary
     if limit is not None:
         i2r = list(relations.most_common(limit)) + [REST]
+        # the 'limit' most frequent labels are maintained, the rest are combined into label REST to save memory
     else:
         i2r = list(relations.items())
-
     r2i = {r: i for i, r in enumerate(i2r)}
-
-    i2n = list(nodes)
-    n2i = {n:i for i, n in enumerate(i2n)}
 
     edges = {}
 
+    # -- Collect all edges into a dictionary: relation -> (from, to)
+    #    (only storing integer indices)
     for s, p, o in tqdm.tqdm(graph):
         s, p, o = n2i[str(s)], str(p), n2i[str(o)]
         p = r2i[p] if p in r2i else r2i[REST]
@@ -86,19 +97,20 @@ def load(name, final=False, limit=None):
         edges[p][0].append(s)
         edges[p][1].append(o)
 
-    # Add self connections
+    # Add self connections explicitly
     edges[len(i2r)] = [], []
 
     for i in range(len(i2r)):
         edges[len(i2r)][0].append(i)
         edges[len(i2r)][1].append(i)
 
-    print('graph loaded.')
+    print('Graph loaded.')
 
+    # -- Load the classification task
     labels_train = pd.read_csv(train_file, sep='\t', encoding='utf8')
     if final:
         labels_test = pd.read_csv(test_file, sep='\t', encoding='utf8')
-    else:
+    else: # split the training data into train and validation
         ltr = labels_train
         pivot = int(len(ltr)*VALPROP)
 
@@ -116,9 +128,11 @@ def load(name, final=False, limit=None):
     for nod, lab in zip(labels_test[nodes_header].values, labels):
        test[nod] = lab
 
-    print('labels loaded.')
+    print('Labels loaded.')
 
-    with open(cachefile, 'wb') as file:
-        pickle.dump([edges, (n2i, i2n), (r2i, i2r), train, test], file)
+    # -- Cache the results for fast loading next time
+    if limit is None:
+        with open(cachefile, 'wb') as file:
+            pickle.dump([edges, (n2i, i2n), (r2i, i2r), train, test], file)
 
     return edges, (n2i, i2n), (r2i, i2r), train, test
