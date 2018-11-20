@@ -20,7 +20,8 @@ from argparse import ArgumentParser
 def go(arg):
     dev = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    edges, (n2i, i2n), (r2i, i2r), train, test = data.load(arg.name, final=arg.final, limit=arg.limit)
+    edges, (n2i, i2n), (r2i, i2r), train, test = \
+        data.load(arg.name, final=arg.final, limit=arg.limit, bidir=not arg.unidir)
 
     # Convert test and train to tensors
     train_idx = [n2i[name] for name, _ in train.items()]
@@ -74,16 +75,20 @@ def go(arg):
                 adj = F.softmax(adj, dim=0)
 
                 nwnodes = torch.mm(adj, nodes)
-                nwnodes = nwnodes.view(r, n, k)
-                nwnodes = nwnodes.mean(dim=0)
-
-                return nwnodes
 
             else:
+                # create a length m 3-tensor by concatentating the appropriate matrix R for each edge
                 rels = [rels[None, :, :, p].expand(len(self.edges[p][0]), k, k) for p in range(r)]
                 rels = torch.cat(rels, dim=0)
 
                 assert len(self.froms) == rels.size(0)
+
+                rel_indices = []
+                for p in range(r):
+                    rel_indices.extend([p] * len(self.edges[p][0]))
+                rel_indices = torch.tensor(rel_indices, device=dev)
+
+                assert len(rel_indices) == rels.size(0)
 
                 froms = nodes[self.froms, :]
                 tos = nodes[self.tos, :]
@@ -94,8 +99,8 @@ def go(arg):
                 att = torch.bmm(torch.bmm(froms, rels), tos).squeeze()
 
                 if sample is None:
-
-                    indices = torch.cat([self.froms[:, None], self.tos[:, None]], dim=1)
+                    fr_indices = self.froms + rel_indices * n
+                    indices = torch.cat([fr_indices[:, None], self.tos[:, None]], dim=1)
                     values = att
 
                 else:
@@ -107,12 +112,16 @@ def go(arg):
 
                 # normalize the values (TODO try sparsemax)
 
-                values = util.logsoftmax(indices, values, (n, n), p=10, row=True)
+                values = util.logsoftmax(indices, values, (n*r, n), p=10, row=True)
                 values = torch.exp(values)
 
                 mm = util.sparsemm(torch.cuda.is_available())
+                nwnodes = mm(indices.t(), values, (n*r, n), nodes)
 
-                return mm(indices.t(), values, (n, n), nodes)
+            nwnodes = nwnodes.view(r, n, k)
+            nwnodes = nwnodes.mean(dim=0)
+
+            return nwnodes
 
     class Model(nn.Module):
 
@@ -218,10 +227,13 @@ if __name__ == "__main__":
                         help="Use the canonical test set instead of a validation split.",
                         action="store_true")
 
+    parser.add_argument("-U", "--unidir", dest="unidir",
+                        help="Only model relations in one direction.",
+                        action="store_true")
+
     parser.add_argument("--dense", dest="dense",
                         help="Use a dense adjacency matrix with the canonical softmax.",
                         action="store_true")
-
 
     parser.add_argument("--limit",
                         dest="limit",

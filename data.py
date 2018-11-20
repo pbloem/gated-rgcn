@@ -8,8 +8,9 @@ import util
 
 VALPROP = 0.4
 REST = '.rest'
+INV  = 'inv.'
 
-def load(name, final=False, limit=None):
+def load(name, final=False, limit=None, bidir=False):
     """
     Loads a knowledge graph dataset. Self connections are automatically added as a special connection
 
@@ -17,6 +18,7 @@ def load(name, final=False, limit=None):
     :param final: If true, load the canonical test set, otherwise split a validation set off from the training data.
     :param limit: If set, the number of unique relations will be limited to this value, plus one for the self-connections,
                   plus one for the remaining connections combined into a single, new relation.
+    :param bidir: Whether to include inverse links for each relation
     :return: A tuyple containing the graph data, and the classification test and train sets.
     """
     # -- Check if the data has been cached for quick loading.
@@ -52,6 +54,13 @@ def load(name, final=False, limit=None):
         label_header = 'label_cateogory'
         nodes_header = 'proxy'
 
+    elif name == 'bgs':
+        file = 'data/bgs/bgs_stripped.nt.gz'
+        train_file = 'data/bgs/trainingSet(lith).tsv'
+        test_file = 'data/bgs/testSet(lith).tsv'
+        label_header = 'label_lithogenesis'
+        nodes_header = 'rock'
+
     # -- Parse the data with RDFLib
     graph = rdf.Graph()
 
@@ -72,15 +81,19 @@ def load(name, final=False, limit=None):
         nodes.add(str(o))
         relations[str(p)] += 1
 
+        if bidir:
+            relations[INV + str(p)] += 1
+
     i2n = list(nodes) # maps indices to labels
     n2i = {n:i for i, n in enumerate(i2n)} # maps labels to indices
 
     # Truncate the list of relations if necessary
     if limit is not None:
-        i2r = list(relations.most_common(limit)) + [REST]
+        i2r = [r[0] for r in  relations.most_common(limit)] + [REST]
         # the 'limit' most frequent labels are maintained, the rest are combined into label REST to save memory
     else:
-        i2r = list(relations.items())
+        i2r =list(relations.keys())
+
     r2i = {r: i for i, r in enumerate(i2r)}
 
     edges = {}
@@ -89,13 +102,23 @@ def load(name, final=False, limit=None):
     #    (only storing integer indices)
     for s, p, o in tqdm.tqdm(graph):
         s, p, o = n2i[str(s)], str(p), n2i[str(o)]
-        p = r2i[p] if p in r2i else r2i[REST]
 
-        if p not in edges:
-            edges[p] = [], []
+        pf = r2i[p] if (p in r2i) else r2i[REST]
 
-        edges[p][0].append(s)
-        edges[p][1].append(o)
+        if pf not in edges:
+            edges[pf] = [], []
+
+        edges[pf][0].append(s)
+        edges[pf][1].append(o)
+
+        if bidir:
+            pi = r2i[INV+p] if (INV+p in r2i) else r2i[REST]
+
+            if pi not in edges:
+                edges[pi] = [], []
+
+            edges[pi][0].append(o)
+            edges[pi][1].append(s)
 
     # Add self connections explicitly
     edges[len(i2r)] = [], []
