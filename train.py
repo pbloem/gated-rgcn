@@ -17,6 +17,8 @@ from tqdm import trange
 
 from argparse import ArgumentParser
 
+EPSILON = 0.000000001
+
 def go(arg):
     dev = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -58,7 +60,10 @@ def go(arg):
             self.register_buffer('froms', torch.tensor(froms, dtype=torch.long))
             self.register_buffer('tos',  torch.tensor(tos, dtype=torch.long))
 
-        def forward(self, nodes, rels, sample=None):
+            if arg.normalize:
+                self.normparams = nn.Parameter(torch.tensor([1.0, 0.0]))
+
+        def forward(self, nodes, rels, sample=None, train=True):
 
             n, k = nodes.size()
             k, k, r = rels.size()
@@ -121,6 +126,20 @@ def go(arg):
             nwnodes = nwnodes.view(r, n, k)
             nwnodes = nwnodes.mean(dim=0)
 
+            if arg.normalize:
+                gamma, beta = self.normparams
+
+                mean = nwnodes.mean(dim=0, keepdim=True)
+                normalized = nwnodes - mean
+
+                var = normalized.var(dim=0, keepdim=True)
+                normalized = normalized / torch.sqrt(var + EPSILON)
+
+                nwnodes = normalized * gamma + beta
+
+            if arg.do is not None and train:
+                nwnodes = F.dropout(nwnodes, p=arg.do)
+
             return nwnodes
 
     class Model(nn.Module):
@@ -151,7 +170,7 @@ def go(arg):
 
             nodes = self.nodes
             for layer in self.layers:
-                nodes = layer(nodes, self.rels, sample=sample)
+                nodes = layer(nodes, self.rels, sample=sample, train=self.training)
 
             return self.toclass(nodes)
 
@@ -166,6 +185,8 @@ def go(arg):
 
     for e in tqdm.trange(arg.epochs):
 
+        model.train(True)
+
         opt.zero_grad()
 
         cls = model()[train_idx, :]
@@ -179,6 +200,8 @@ def go(arg):
 
         # Evaluate
         with torch.no_grad():
+
+            model.train(False)
             cls = model()[train_idx, :]
             agreement = cls.argmax(dim=1) == train_lbl
             accuracy = float(agreement.sum()) / agreement.size(0)
@@ -218,10 +241,20 @@ if __name__ == "__main__":
                         help="Learning rate",
                         default=0.001, type=float)
 
+    parser.add_argument("--do",
+                        dest="do",
+                        help="Dropout",
+                        default=None, type=float)
+
     parser.add_argument("-D", "--dataset-name",
                         dest="name",
                         help="Name of dataset to use [aifb, am]",
                         default='aifb', type=str)
+
+    parser.add_argument("-N", "--normalize",
+                        dest="normalize",
+                        help="Normalize the embeddings.",
+                        action="store_true")
 
     parser.add_argument("-F", "--final", dest="final",
                         help="Use the canonical test set instead of a validation split.",
