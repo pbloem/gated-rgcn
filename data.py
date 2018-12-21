@@ -34,8 +34,8 @@ def load(name, final=False, limit=None, bidir=False):
     if name == 'aifb':
         # AIFB data (academics, affiliations, publications, etc. About 8k nodes)
         file = util.DIR + '/data/aifb/aifb_stripped.nt.gz'
-        train_file = util.DIR + './data/aifb/trainingSet.tsv'
-        test_file = util.DIR + './data/aifb/testSet.tsv'
+        train_file = util.DIR + '/data/aifb/trainingSet.tsv'
+        test_file = util.DIR + '/data/aifb/testSet.tsv'
         label_header = 'label_affiliation'
         nodes_header = 'person'
 
