@@ -52,6 +52,7 @@ def go(arg):
             self.i2n, self.i2r, self.edges = graph
 
             froms, tos = [], []
+            n, r, k = len(i2n), len(i2r) + 1, arg.emb_size
 
             for p in edges.keys():
                 froms.extend(edges[p][0])
@@ -63,10 +64,15 @@ def go(arg):
             if arg.normalize:
                 self.normparams = nn.Parameter(torch.tensor([1.0, 0.0]))
 
+            self.pool = nn.Sequential(
+                nn.Linear(k * r, 4 * k), nn.ReLU(),
+                nn.Linear(4 * k, k)
+            )
+
         def forward(self, nodes, rels, sample=None, train=True):
 
             n, k = nodes.size()
-            k, k, r = rels.size()
+            r, k = rels.size()
 
             if arg.dense:
 
@@ -83,17 +89,10 @@ def go(arg):
 
             else:
                 # create a length m 3-tensor by concatentating the appropriate matrix R for each edge
-                rels = [rels[None, :, :, p].expand(len(self.edges[p][0]), k, k) for p in range(r)]
+                rels = [rels[p:p+1, :].expand(len(self.edges[p][0]), k) for p in range(r)]
                 rels = torch.cat(rels, dim=0)
 
                 assert len(self.froms) == rels.size(0)
-
-                rel_indices = []
-                for p in range(r):
-                    rel_indices.extend([p] * len(self.edges[p][0]))
-                rel_indices = torch.tensor(rel_indices, device=dev)
-
-                assert len(rel_indices) == rels.size(0)
 
                 froms = nodes[self.froms, :]
                 tos = nodes[self.tos, :]
@@ -101,9 +100,20 @@ def go(arg):
                 froms, tos = froms[:, None, :], tos[:, :, None]
 
                 # unnormalized attention weights
-                att = torch.bmm(torch.bmm(froms, rels), tos).squeeze()
+                # print(froms.size(), rels.size(), tos.size())
+                # sys.exit()
+                att = torch.bmm(froms * rels[:, None, :], tos).squeeze()
 
                 if sample is None:
+
+
+                    rel_indices = []
+                    for p in range(r):
+                        rel_indices.extend([p] * len(self.edges[p][0]))
+                    rel_indices = torch.tensor(rel_indices, device=dev)
+
+                    assert len(rel_indices) == rels.size(0)
+
                     fr_indices = self.froms + rel_indices * n
                     indices = torch.cat([fr_indices[:, None], self.tos[:, None]], dim=1)
                     values = att
@@ -113,7 +123,6 @@ def go(arg):
                     pass
 
                 self.values = values
-                self.values.retain_grad()
 
                 # normalize the values (TODO try sparsemax)
 
@@ -124,7 +133,11 @@ def go(arg):
                 nwnodes = mm(indices.t(), values, (n*r, n), nodes)
 
             nwnodes = nwnodes.view(r, n, k)
-            nwnodes = nwnodes.mean(dim=0)
+
+            # nwnodes = nwnodes.mean(dim=0)
+            nwnodes = nwnodes.permute((1, 0, 2)).contiguous().view(n, r*k)
+            nwnodes = self.pool(nwnodes)
+
 
             if arg.normalize:
                 gamma, beta = self.normparams
@@ -153,7 +166,7 @@ def go(arg):
             n = len(self.i2n)
 
             # relation embeddings
-            self.rels = nn.Parameter(torch.randn(k, k, len(self.i2r) + 1)) # TODO initialize properly (like distmult?)
+            self.rels = nn.Parameter(torch.randn(len(self.i2r) + 1, k)) # TODO initialize properly (like distmult?)
 
             # node embeddings (layer 0)
             self.nodes = nn.Parameter(torch.randn(n, k)) # TODO initialize properly (like embedding?)

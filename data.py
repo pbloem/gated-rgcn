@@ -89,7 +89,7 @@ def load(name, final=False, limit=None, bidir=False):
 
     # Truncate the list of relations if necessary
     if limit is not None:
-        i2r = [r[0] for r in  relations.most_common(limit)] + [REST]
+        i2r = [r[0] for r in  relations.most_common(limit)] + [REST, INV+REST]
         # the 'limit' most frequent labels are maintained, the rest are combined into label REST to save memory
     else:
         i2r =list(relations.keys())
@@ -112,7 +112,7 @@ def load(name, final=False, limit=None, bidir=False):
         edges[pf][1].append(o)
 
         if bidir:
-            pi = r2i[INV+p] if (INV+p in r2i) else r2i[REST]
+            pi = r2i[INV+p] if (INV+p in r2i) else r2i[INV+REST]
 
             if pi not in edges:
                 edges[pi] = [], []
