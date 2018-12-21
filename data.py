@@ -22,7 +22,7 @@ def load(name, final=False, limit=None, bidir=False):
     :return: A tuyple containing the graph data, and the classification test and train sets.
     """
     # -- Check if the data has been cached for quick loading.
-    cachefile = 'data' + os.sep + name + os.sep + 'cache.pkl'
+    cachefile = util.DIR + os.sep + 'data' + os.sep + name + os.sep + 'cache.pkl'
     if os.path.isfile(cachefile) and limit is None:
         print('Using cached data.')
         with open(cachefile, 'rb') as file:
