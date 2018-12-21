@@ -28,6 +28,7 @@ import math
 tics = []
 
 DEBUG = False
+DIR = os.path.dirname(os.path.realpath(__file__))
 
 def kl_loss(zmean, zlsig):
     b, l = zmean.size()

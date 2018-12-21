@@ -33,31 +33,31 @@ def load(name, final=False, limit=None, bidir=False):
 
     if name == 'aifb':
         # AIFB data (academics, affiliations, publications, etc. About 8k nodes)
-        file = './data/aifb/aifb_stripped.nt.gz'
-        train_file = './data/aifb/trainingSet.tsv'
-        test_file = './data/aifb/testSet.tsv'
+        file = util.DIR + '/data/aifb/aifb_stripped.nt.gz'
+        train_file = util.DIR + './data/aifb/trainingSet.tsv'
+        test_file = util.DIR + './data/aifb/testSet.tsv'
         label_header = 'label_affiliation'
         nodes_header = 'person'
 
     if name == 'am':
         # Collection of the Amsterdam Museum. Data is downloaded on first load.
         data_url = 'https://www.dropbox.com/s/1mp9aot4d9j01h9/am_stripped.nt.gz?dl=1'
-        file = 'data/am/am_stripped.nt.gz'
+        file = util.DIR + '/data/am/am_stripped.nt.gz'
 
         print('dataset file exists: ', os.path.isfile(file))
         if not os.path.isfile(file):
             print('Downloading AM data.')
             wget.download(data_url, file)
 
-        train_file = 'data/am/trainingSet.tsv'
-        test_file = 'data/am/testSet.tsv'
+        train_file = util.DIR +'/data/am/trainingSet.tsv'
+        test_file = util.DIR +'/data/am/testSet.tsv'
         label_header = 'label_cateogory'
         nodes_header = 'proxy'
 
     elif name == 'bgs':
-        file = 'data/bgs/bgs_stripped.nt.gz'
-        train_file = 'data/bgs/trainingSet(lith).tsv'
-        test_file = 'data/bgs/testSet(lith).tsv'
+        file = util.DIR + '/data/bgs/bgs_stripped.nt.gz'
+        train_file = util.DIR + '/data/bgs/trainingSet(lith).tsv'
+        test_file = util.DIR + '/data/bgs/testSet(lith).tsv'
         label_header = 'label_lithogenesis'
         nodes_header = 'rock'
 
