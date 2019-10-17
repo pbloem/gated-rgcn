@@ -97,7 +97,9 @@ def go(arg):
 
             print(f',   test accuracy {float(accuracy):.2}')
 
-        del loss # clear memory
+        if torch.cuda.is_available():
+            del loss # clear memory
+            torch.cuda.empty_cache()
 
     print('training finished.')
 
