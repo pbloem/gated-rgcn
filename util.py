@@ -731,7 +731,7 @@ def logsoftmax(indices, values, size, p=20, row=True, cuda=torch.cuda.is_availab
 
 def rowpnorm(indices, values, size, p, row=True, cuda=torch.cuda.is_available()):
     """
-    Row or column log-softmaxes a sparse matrix (using logsumexp trick)
+    Row or column p-norms a sparse matrix (using logsumexp trick)
     :param indices:
     :param values:
     :param size:

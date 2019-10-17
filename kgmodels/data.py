@@ -8,7 +8,7 @@ import util
 
 VALPROP = 0.4
 REST = '.rest'
-INV  = 'inv.'
+INV  = '.inv'
 
 def load(name, final=False, limit=None, bidir=False):
     """
@@ -19,47 +19,53 @@ def load(name, final=False, limit=None, bidir=False):
     :param limit: If set, the number of unique relations will be limited to this value, plus one for the self-connections,
                   plus one for the remaining connections combined into a single, new relation.
     :param bidir: Whether to include inverse links for each relation
-    :return: A tuyple containing the graph data, and the classification test and train sets.
+    :return: A tuple containing the graph data, and the classification test and train sets:
+              - edges: dictionary of edges (relation -> pair of lists cont. subject and object indices respectively)
     """
     # -- Check if the data has been cached for quick loading.
-    cachefile = util.DIR + os.sep + 'data' + os.sep + name + os.sep + 'cache.pkl'
+    cachefile = util.here('data' + os.sep + name + os.sep + 'cache.pkl')
     if os.path.isfile(cachefile) and limit is None:
         print('Using cached data.')
         with open(cachefile, 'rb') as file:
             data = pickle.load(file)
             print('Loaded.')
             return data
-    print('No cache (or relation limit set), loading data.')
+
+    print('No cache found (or relation limit is set). Loading data from scratch.')
 
     if name == 'aifb':
         # AIFB data (academics, affiliations, publications, etc. About 8k nodes)
-        file = util.DIR + '/data/aifb/aifb_stripped.nt.gz'
-        train_file = util.DIR + '/data/aifb/trainingSet.tsv'
-        test_file = util.DIR + '/data/aifb/testSet.tsv'
+        file = util.here('data/aifb/aifb_stripped.nt.gz')
+
+        train_file = util.here('data/aifb/trainingSet.tsv')
+        test_file = util.here('data/aifb/testSet.tsv')
         label_header = 'label_affiliation'
         nodes_header = 'person'
 
-    if name == 'am':
+    elif name == 'am':
         # Collection of the Amsterdam Museum. Data is downloaded on first load.
         data_url = 'https://www.dropbox.com/s/1mp9aot4d9j01h9/am_stripped.nt.gz?dl=1'
-        file = util.DIR + '/data/am/am_stripped.nt.gz'
+        file = util.here('data/am/am_stripped.nt.gz')
 
         print('dataset file exists: ', os.path.isfile(file))
         if not os.path.isfile(file):
             print('Downloading AM data.')
             wget.download(data_url, file)
 
-        train_file = util.DIR +'/data/am/trainingSet.tsv'
-        test_file = util.DIR +'/data/am/testSet.tsv'
+        train_file = util.here('data/am/trainingSet.tsv')
+        test_file = util.here('data/am/testSet.tsv')
         label_header = 'label_cateogory'
         nodes_header = 'proxy'
 
     elif name == 'bgs':
-        file = util.DIR + '/data/bgs/bgs_stripped.nt.gz'
-        train_file = util.DIR + '/data/bgs/trainingSet(lith).tsv'
-        test_file = util.DIR + '/data/bgs/testSet(lith).tsv'
+        file = util.here('data/bgs/bgs_stripped.nt.gz')
+        train_file = util.here('data/bgs/trainingSet(lith).tsv')
+        test_file = util.here('data/bgs/testSet(lith).tsv')
         label_header = 'label_lithogenesis'
         nodes_header = 'rock'
+
+    else:
+        raise Exception(f'Data {name} not recognized')
 
     # -- Parse the data with RDFLib
     graph = rdf.Graph()
@@ -159,3 +165,7 @@ def load(name, final=False, limit=None, bidir=False):
             pickle.dump([edges, (n2i, i2n), (r2i, i2r), train, test], file)
 
     return edges, (n2i, i2n), (r2i, i2r), train, test
+
+
+def random_path(num_nodes=1000, num_rels=3, path_length=2):
+    pass
