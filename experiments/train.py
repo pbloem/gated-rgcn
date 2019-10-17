@@ -97,6 +97,8 @@ def go(arg):
 
             print(f',   test accuracy {float(accuracy):.2}')
 
+        del loss # clear memory
+
     print('training finished.')
 
 if __name__ == "__main__":
