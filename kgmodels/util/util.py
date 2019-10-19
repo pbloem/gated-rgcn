@@ -1,6 +1,10 @@
 import torch, os, sys
 
 from torch.autograd import Variable
+import torch.nn.functional as F
+
+from collections.abc import Iterable
+
 
 def mask_(matrices, maskval=0.0, mask_diagonal=True):
     """
@@ -264,3 +268,122 @@ def intlist(tensor):
         l[i] = int(tensor[i])
 
     return l
+
+
+def simple_normalize(indices, values, size, row=True, method='softplus', cuda=torch.cuda.is_available()):
+    """
+    Simple softmax-style normalization with
+
+    :param indices:
+    :param values:
+    :param size:
+    :param row:
+    :return:
+    """
+    epsilon = 1e-7
+
+    if method == 'softplus':
+        values = F.softplus(values)
+    elif method == 'abs':
+        values = values.abs()
+    elif method == 'relu':
+        values = F.relu(values)
+    else:
+        raise Exception(f'Method {method} not recognized')
+
+    sums = sum_sparse(indices, values, size, row=row)
+
+    return (values/(sums + epsilon))
+
+# -- stable(ish) softmax
+def logsoftmax(indices, values, size, its=10, p=2, method='iteration', row=True, cuda=torch.cuda.is_available()):
+    """
+    Row or column log-softmaxes a sparse matrix (using logsumexp trick)
+    :param indices:
+    :param values:
+    :param size:
+    :param row:
+    :return:
+    """
+    epsilon = 1e-7
+
+    if method == 'naive':
+        values = values.exp()
+        sums = sum_sparse(indices, values, size, row=row)
+
+        return (values/(sums + epsilon)).log()
+
+    if method == 'pnorm':
+        maxes = rowpnorm(indices, values, size, p=p)
+    elif method == 'iteration':
+        maxes = itmax(indices, values, size,its=its, p=p)
+    else:
+        raise Exception('Max method {} not recognized'.format(method))
+
+    mvalues = torch.exp(values - maxes)
+
+    sums = sum_sparse(indices, mvalues, size, row=row)  # row/column sums]
+
+    return mvalues.log() - sums.log()
+
+def rowpnorm(indices, values, size, p, row=True):
+    """
+    Row or column p-norms a sparse matrix
+    :param indices:
+    :param values:
+    :param size:
+    :param row:
+    :return:
+    """
+    pvalues = torch.pow(values, p)
+    sums = sum_sparse(indices, pvalues, size, row=row)
+
+    return torch.pow(sums, 1.0/p)
+
+def itmax(indices, values, size, its=10, p=2, row=True):
+    """
+    Iterative computation of row max
+
+    :param indices:
+    :param values:
+    :param size:
+    :param p:
+    :param row:
+    :param cuda:
+    :return:
+    """
+
+    epsilon = 0.00000001
+
+    # create an initial vector with all values made positive
+    # weights = values - values.min()
+    weights = F.softplus(values)
+    weights = weights / (sum_sparse(indices, weights, size) + epsilon)
+
+    # iterate, weights converges to a one-hot vector
+    for i in range(its):
+        weights = weights.pow(p)
+
+        sums = sum_sparse(indices, weights, size, row=row)  # row/column sums
+        weights = weights/sums
+
+    return sum_sparse(indices, values * weights, size, row=row)
+
+
+def contains_nan(input):
+    if (not isinstance(input, torch.Tensor)) and isinstance(input, Iterable):
+        for i in input:
+            if contains_nan(i):
+                return True
+        return False
+    else:
+        return bool(torch.isnan(input).sum() > 0)
+#
+def contains_inf(input):
+    if (not isinstance(input, torch.Tensor)) and isinstance(input, Iterable):
+        for i in input:
+            if contains_inf(i):
+                return True
+        return False
+    else:
+        return bool(torch.isinf(input).sum() > 0)

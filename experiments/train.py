@@ -28,8 +28,8 @@ def go(arg):
 
     if arg.name == 'random':
 
-        N = 60000
-
+        edges, N, _,  (train_idx, train_lbl), (test_idx, test_lbl) = kgmodels.random_graph(base='aifb', depth=arg.rd)
+        num_cls = 2
 
     else:
         edges, (n2i, i2n), (r2i, i2r), train, test = \
@@ -51,13 +51,13 @@ def go(arg):
 
         N = len(i2n)
 
+        num_cls = len(cls)
+
     """
     Define model
     """
-    num_cls = len(cls)
-    indices, size = util.adj(edges, N)
-
-    model = kgmodels.NodeClassifier(graph=(indices, size), depth=arg.depth, emb=arg.emb, mixer=arg.mixer, numcls=num_cls, dropout=arg.do, bases=arg.bases)
+    model = kgmodels.NodeClassifier(edges=edges, n=N, depth=arg.depth, emb=arg.emb, mixer=arg.mixer, numcls=num_cls,
+                                    dropout=arg.do, bases=arg.bases, norm_method='softplus')
 
     if torch.cuda.is_available():
         model.cuda()
@@ -169,6 +169,11 @@ if __name__ == "__main__":
                         dest="limit",
                         help="Limit the number of relations.",
                         default=None, type=int)
+
+    parser.add_argument("--rd",
+                        dest="rd",
+                        help="Depth at which the pattern is inserted n the random graph..",
+                        default=3, type=int)
 
     parser.add_argument("--bases",
                         dest="bases",

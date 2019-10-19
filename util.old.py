@@ -712,7 +712,6 @@ def logsoftmax(indices, values, size, p=20, row=True, cuda=torch.cuda.is_availab
     maxes = rowpnorm(indices, relud, size, p)
     mvalues = torch.exp(relud - maxes)
 
-
     if row:
         ones = torch.ones((size[1],), device=dv)
     else:

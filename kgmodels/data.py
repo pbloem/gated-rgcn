@@ -167,5 +167,44 @@ def load(name, final=False, limit=None, bidir=False):
     return edges, (n2i, i2n), (r2i, i2r), train, test
 
 
-def random_path(num_nodes=1000, num_rels=3, path_length=2):
-    pass
+def random_graph(base='aifb', train=1000, test=1000, depth=3):
+
+    edges, (_, i2n), (_, i2r), _, _= load(name=base)
+
+    n, r, t = len(i2n), len(i2r) + 1, train+test
+    entities = random.sample(range(n), t)
+    classes = []
+
+    # add random paths
+    for e in entities:
+
+        cls = random.choice([0, 1]) # the class of the node
+        classes.append(cls)
+
+        for i in range(depth):
+
+            rel = r + i
+
+            if i < depth - 1:
+                next = random.choice(range(n))
+            else:
+                next = cls
+
+            if rel not in edges.keys():
+                edges[rel] = ([], [])
+
+            fr, to = edges[rel]
+            fr.append(e)
+            to.append(next)
+
+            e = next
+
+    train_idx = torch.tensor(entities[:train], dtype=torch.long)
+    train_lbl = torch.tensor(classes[:train],  dtype=torch.long)
+
+    test_idx = torch.tensor(entities[train:], dtype=torch.long)
+    test_lbl = torch.tensor(classes[train:], dtype=torch.long)
+
+    return edges, n, r + depth, (train_idx, train_lbl), (test_idx, test_lbl)
+
+

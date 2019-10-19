@@ -6,16 +6,13 @@ import layers
 
 class NodeClassifier(nn.Module):
 
-    def __init__(self, graph, numcls, mixer='gcn', emb=16, depth=2, **kwargs):
+    def __init__(self, edges, n, numcls, mixer='gcn', emb=16, depth=2, **kwargs):
 
         super().__init__()
 
-        rn, n = graph[1]
-        r = rn//n
-
         self.nodes = nn.Parameter(torch.randn(n, emb))
 
-        gblocks = [GraphBlock(graph, mixer, emb, **kwargs) for _ in range(depth)]
+        gblocks = [GraphBlock(edges, n, mixer, emb, **kwargs) for _ in range(depth)]
         self.gblocks = nn.Sequential(*gblocks)
 
         self.cls = nn.Linear(emb, numcls)
@@ -36,14 +33,14 @@ class GraphBlock(nn.Module):
 
     """
 
-    def __init__(self, graph, mixer='gcn', emb=16, mult=4, dropout=None, **kwargs):
+    def __init__(self, edges, n, mixer='gcn', emb=16, mult=4, dropout=None, **kwargs):
 
         super().__init__()
 
         if mixer == 'gcn':
-            self.mixer = layers.GCN(graph, emb=emb)
+            self.mixer = layers.GCN(edges, n, emb=emb, **kwargs)
         elif mixer == 'gat':
-            self.mixer = layers.GAT(graph, emb=emb)
+            self.mixer = layers.GAT(edges, n, emb=emb, **kwargs)
         else:
             raise Exception(f'Mixer {mixer} not recognized')
 
