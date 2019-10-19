@@ -56,7 +56,7 @@ class GCN(nn.Module):
         h = torch.mm(self.graph, x)
         h = h.view(r, n, e) # new dim for the relations
 
-        if self.bases:
+        if self.bases is not None:
             weights = torch.einsum('rb, bij -> rij', self.comps, self.bases)
         else:
             weights = self.weights
