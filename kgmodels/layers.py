@@ -69,7 +69,8 @@ class GCN(nn.Module):
 
 class GAT(nn.Module):
     """
-    Self-attention over the graph
+    We apply one standard self attention (with multiple heads) to each relation, connecting only those nodes that are
+    connectedunder that relation
 
     """
 
@@ -96,7 +97,7 @@ class GAT(nn.Module):
         self.toqueries = nn.Parameter(torch.FloatTensor(r, heads, s, s).uniform_(-sqrt(s), sqrt(s)))
         self.tovals    = nn.Parameter(torch.FloatTensor(r, heads, s, s).uniform_(-sqrt(s), sqrt(s)))
 
-        self.unify     = nn.Linear(emb, emb, bias=False)
+        self.unify     = nn.Parameter(torch.FloatTensor(r, emb, emb).uniform_(-sqrt(emb), sqrt(emb)))
 
         # convert the edges dict to a matrix of triples
         s, o, p = [], [], []
@@ -117,7 +118,6 @@ class GAT(nn.Module):
     def forward(self, x):
         """
         :param x: E by N matrix of node embeddings.
-
         :return:
         """
 
@@ -176,7 +176,7 @@ class GAT(nn.Module):
         output = output.view(h, r, n, s).permute(2, 1, 0, 3).contiguous().view(n, r, h*s)
 
         # unify the heads
-        output = self.unify(output)
+        output = torch.einsum('rij, nrj -> nri', self.unify, output)
 
         # unify the relations
         output = output.sum(dim=1)
