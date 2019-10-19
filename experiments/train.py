@@ -57,7 +57,7 @@ def go(arg):
     Define model
     """
     model = kgmodels.NodeClassifier(edges=edges, n=N, depth=arg.depth, emb=arg.emb, mixer=arg.mixer, numcls=num_cls,
-                                    dropout=arg.do, bases=arg.bases, norm_method='softplus', heads=arg.heads)
+                                    dropout=arg.do, bases=arg.bases, norm_method=arg.norm_method, heads=arg.heads)
 
     if torch.cuda.is_available():
         print('Using CUDA.')
@@ -185,6 +185,11 @@ if __name__ == "__main__":
                         dest="bases",
                         help="Number of bases.",
                         default=None, type=int)
+
+    parser.add_argument("--nm",
+                        dest="norm_method",
+                        help="Method for row-normalizing the GAT attention weights.",
+                        default='softmax', type=str)
 
     options = parser.parse_args()
 
