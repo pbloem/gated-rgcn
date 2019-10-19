@@ -60,6 +60,7 @@ def go(arg):
                                     dropout=arg.do, bases=arg.bases, norm_method='softplus', heads=arg.heads)
 
     if torch.cuda.is_available():
+        print('Using CUDA.')
         model.cuda()
         train_lbl = train_lbl.cuda()
         test_lbl  = test_lbl.cuda()
