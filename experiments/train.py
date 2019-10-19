@@ -23,7 +23,17 @@ from argparse import ArgumentParser
 
 EPSILON = 0.000000001
 
+
+global repeats
+
+def prt(str, end='\n'):
+    if repeats == 1:
+        print(str, end=end)
+
 def go(arg):
+    global repeats
+    repeats = arg.repeats
+
     dev = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     if arg.name == 'random':
@@ -60,49 +70,60 @@ def go(arg):
                                     dropout=arg.do, bases=arg.bases, norm_method=arg.norm_method, heads=arg.heads)
 
     if torch.cuda.is_available():
-        print('Using CUDA.')
+        prt('Using CUDA.')
         model.cuda()
         train_lbl = train_lbl.cuda()
         test_lbl  = test_lbl.cuda()
 
     opt = torch.optim.AdamW(model.parameters(), lr=arg.lr, weight_decay=arg.wd)
 
-    for e in range(arg.epochs):
+    train_accs = []
+    test_accs = []
+    for r in tqdm.trange(repeats) if repeats > 1 else range(repeats):
+        for e in range(arg.epochs):
 
-        model.train(True)
+            model.train(True)
 
-        opt.zero_grad()
+            opt.zero_grad()
 
-        cls = model()[train_idx, :]
-
-        loss = F.cross_entropy(cls, train_lbl)
-
-        loss.backward()
-        opt.step()
-
-        print(f'epoch {e},  loss {loss.item():.2}', end='')
-
-        # Evaluate
-        with torch.no_grad():
-
-            model.train(False)
             cls = model()[train_idx, :]
-            agreement = cls.argmax(dim=1) == train_lbl
-            accuracy = float(agreement.sum()) / agreement.size(0)
 
-            print(f',    train accuracy {float(accuracy):.2}', end='')
+            loss = F.cross_entropy(cls, train_lbl)
 
-            cls = model()[test_idx, :]
-            agreement = cls.argmax(dim=1) == test_lbl
-            accuracy = float(agreement.sum()) / agreement.size(0)
+            loss.backward()
+            opt.step()
 
-            print(f',   test accuracy {float(accuracy):.2}')
+            prt(f'epoch {e},  loss {loss.item():.2}', end='')
 
-        if torch.cuda.is_available():
-            del loss # clear memory
-            torch.cuda.empty_cache()
+            # Evaluate
+            with torch.no_grad():
+
+                model.train(False)
+                cls = model()[train_idx, :]
+                agreement = cls.argmax(dim=1) == train_lbl
+                accuracy = float(agreement.sum()) / agreement.size(0)
+
+                prt(f',    train accuracy {float(accuracy):.2}', end='')
+                if e == arg.epochs - 1:
+                    train_accs.append(float(accuracy))
+
+                cls = model()[test_idx, :]
+                agreement = cls.argmax(dim=1) == test_lbl
+                accuracy = float(agreement.sum()) / agreement.size(0)
+
+                prt(f',   test accuracy {float(accuracy):.2}')
+                if e == arg.epochs - 1:
+                    test_accs.append(float(accuracy))
+
+            if torch.cuda.is_available():
+                del loss # clear memory
+                torch.cuda.empty_cache()
 
     print('training finished.')
+
+    tracc, teacc = torch.tensor(train_accs), torch.tensor(test_accs)
+    print(f'mean training accuracy {tracc.mean():.3} ({tracc.std():.3})')
+    print(f'mean test accuracy     {teacc.mean():.3} ({teacc.std():.3})')
 
 if __name__ == "__main__":
 
@@ -185,6 +206,11 @@ if __name__ == "__main__":
                         dest="bases",
                         help="Number of bases.",
                         default=None, type=int)
+
+    parser.add_argument("--repeats",
+                        dest="repeats",
+                        help="Number of times to repeat the experiment.",
+                        default=1, type=int)
 
     parser.add_argument("--nm",
                         dest="norm_method",
