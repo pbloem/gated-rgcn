@@ -57,7 +57,7 @@ def go(arg):
     Define model
     """
     model = kgmodels.NodeClassifier(edges=edges, n=N, depth=arg.depth, emb=arg.emb, mixer=arg.mixer, numcls=num_cls,
-                                    dropout=arg.do, bases=arg.bases, norm_method='softplus')
+                                    dropout=arg.do, bases=arg.bases, norm_method='softplus', heads=arg.heads)
 
     if torch.cuda.is_available():
         model.cuda()
@@ -174,6 +174,11 @@ if __name__ == "__main__":
                         dest="rd",
                         help="Depth at which the pattern is inserted n the random graph..",
                         default=3, type=int)
+
+    parser.add_argument("--heads",
+                        dest="heads",
+                        help="Number of attention heads per relation.",
+                        default=4, type=int)
 
     parser.add_argument("--bases",
                         dest="bases",
