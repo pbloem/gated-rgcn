@@ -12,7 +12,7 @@ INV  = '.inv'
 
 def load(name, final=False, limit=None, bidir=False):
     """
-    Loads a knowledge graph dataset. Self connections are automatically added as a special connection
+    Loads a knowledge graph dataset. Self connections are automatically added as a special relation
 
     :param name: Dataset name ('aifb' or 'am' at the moment)
     :param final: If true, load the canonical test set, otherwise split a validation set off from the training data.
@@ -166,38 +166,184 @@ def load(name, final=False, limit=None, bidir=False):
 
     return edges, (n2i, i2n), (r2i, i2r), train, test
 
+def assign(patternnode, num_nodes, entity, cls, mem, ind, sz, unique_constants=True):
+    """
 
-def random_graph(base='aifb', train=1000, test=1000, depth=3):
+    :param patternnode:
+    :param num_nodes:
+    :param entity:
+    :param cls:
+    :param mem:
+    :param ind: How many-th instance this is
+    :param sz: Number of constants in the pattern
+    :param unique_constants: Whether to add a new constant node for each instance
+    :return:
+    """
 
-    edges, (_, i2n), (_, i2r), _, _= load(name=base)
+    if patternnode is None: # class node
+        return cls
 
-    n, r, t = len(i2n), len(i2r) + 1, train+test
-    entities = random.sample(range(n), t)
+    if patternnode == 0: # entity node
+        return entity
+
+    if patternnode > 0: # new constant
+
+        if unique_constants:
+            return num_nodes - 1 + (ind * sz) + patternnode
+        else:
+            return num_nodes - 1 + patternnode
+
+    if patternnode not in mem:
+        inst = random.randint(0, num_nodes - 1) #
+        mem[patternnode] = inst
+
+    return mem[patternnode]
+
+def size(bgp):
+
+    nodes = set()
+    for s, p, o in bgp:
+        if s is not None and s > 0:
+            nodes.add(s)
+        if o is not None and o > 0:
+            nodes.add(o)
+
+    return len(nodes)
+
+def rint(n):
+    return random.randint(0, n - 1)
+
+def fan(train=1000, test=1000, others=1000, depth=3, diffusion=5):
+    """
+    Creates a random classification problem with a "fan" structure
+    :param train:
+    :param test:
+    :param others:
+    :param depth:
+    :return:
+    """
+
+    t = train + test
+    r = depth
+
+    edges = { rel : ([], []) for rel in range(r)}
+
     classes = []
+    imax = 2 + test + train + others - 1 # index of the highest node
 
-    # add random paths
-    for e in entities:
+    for e in range(2, t+2):
 
-        cls = random.choice([0, 1]) # the class of the node
+        current = e
+        cls = random.choice([0, 1])
         classes.append(cls)
 
-        for i in range(depth):
+        for d in range(depth):
+            next = None
+            for diff in range(diffusion):
 
-            rel = r + i
+                if diff == 0: # informative connection (unique node per instance)
+                    if d == depth - 1:
+                        other = cls
+                    else:
+                        imax += 1
+                        next = other = imax
+                else: # diffusion connection (from the pool of random nodes)
+                    other = 2 + t + rint(others)
 
-            if i < depth - 1:
-                next = random.choice(range(n))
-            else:
-                next = cls
+                fr, to = edges[d]
 
-            if rel not in edges.keys():
-                edges[rel] = ([], [])
+                fr.append(current)
+                to.append(other)
 
-            fr, to = edges[rel]
-            fr.append(e)
-            to.append(next)
+            current = next
 
-            e = next
+    # add inverse connections
+    for d in range(depth):
+        fr, to = edges[d]
+        edges[d + depth] = to, fr
+
+    # add self connections
+    edges[depth * 2] = (list(range(imax+1)), list(range(imax+1)))
+
+    train_idx = torch.arange(2, train+2, dtype=torch.long)
+    train_lbl = torch.tensor(classes[:train],  dtype=torch.long)
+
+    test_idx = torch.arange(2+train, 2+train+test, dtype=torch.long)
+    test_lbl = torch.tensor(classes[train:], dtype=torch.long)
+
+    return edges, imax+1, (train_idx, train_lbl), (test_idx, test_lbl)
+
+
+def random_graph(base='aifb', train=1000, test=1000, bgp0=[(0, 1, -2), (-2, 2, -3), (-3, 3, None)], bgp1=[(0, 1, -2), (-2, 2, -3), (-3, 3, None)]):
+    """
+
+    Randomly wires basic graph patterns (BGP) into a base graph to generate a binary classification task. Instance nodes
+    are chosen at random, and each is extended with one instance of the given BGP.
+
+    For each node variable in the BGP, a random node is chosen from the base graph. For each variable relation, a random
+    _relation_ is chosen from the base graph. For each constant node in the BGP, a new node is added to the base graph.
+    For each constant _relation_, a new relation is added to the base graph. One node in the BGP represents the class of
+    the instance node. This node becomes node 0 or node 1 in the BGP instance, depending on the class chosen (randomly)
+    for the instance.
+
+    :param base: Name of the knowledge graph to extend.
+    :param train: Number of training instance nodes.
+    :param test: Number of test instance nodes.
+    :param bgp0, bgp1: Basic graph patterns for class 0 and class 1. Provided as a list of integer triples. Positive integers indicate constants,
+        negative integers indicate variables. One node should be 0, which indicates the entity node, and one node should
+        be None, which indicates the class node. If string, eval is called to turn into list.
+    :return:
+    """
+
+    if type(bgp0) == str:
+        bgp0 = eval(bgp0)
+    if type(bgp1) == str:
+        bgp1 = eval(bgp1)
+
+    assert type(bgp0) == list
+    assert type(bgp1) == list
+
+    size0, size1 = size(bgp0), size(bgp1)
+
+    if base == 'empty':
+        edges = {}
+        r = 0
+
+        n = 8000
+        t = train + test
+        entities = list(range(t))
+    else:
+        edges, (_, i2n), (_, i2r), _, _= load(name=base)
+
+
+        n, r, t = len(i2n), len(i2r) + 1, train+test
+        entities = random.sample(range(n), t)
+
+    classes = []
+
+    print(f'Loaded {base} as base graph with {n} nodes and {r} relations.')
+
+    # add random BGPs
+    for i, e in enumerate(entities):
+
+        cls, bgp, sz = random.choice([(0, bgp0, size0), (1, bgp1, size1)]) # the class of the node
+        classes.append(cls)
+
+        memn, memr = {}, {} # remembers which variable is assigned to which graph element
+        for s, p, o in bgp:
+
+            assert p != 0
+            rl = assign(p, r, None, None, memr, i, sz, unique_constants=False)
+
+            fr = assign(s, n, e, cls, memn, i, sz)
+            to = assign(o, n, e, cls, memn, i, sz)
+
+            if rl not in edges.keys():
+                edges[rl] = ([], [])
+
+            fs, ts = edges[rl]
+            fs.append(fr)
+            ts.append(to)
 
     train_idx = torch.tensor(entities[:train], dtype=torch.long)
     train_lbl = torch.tensor(classes[:train],  dtype=torch.long)
@@ -205,6 +351,8 @@ def random_graph(base='aifb', train=1000, test=1000, depth=3):
     test_idx = torch.tensor(entities[train:], dtype=torch.long)
     test_lbl = torch.tensor(classes[train:], dtype=torch.long)
 
-    return edges, n, r + depth, (train_idx, train_lbl), (test_idx, test_lbl)
+    n = max([max(fs+ts) for _, (fs, ts) in edges.items()]) + 1
+
+    return edges, n, (train_idx, train_lbl), (test_idx, test_lbl)
 
 

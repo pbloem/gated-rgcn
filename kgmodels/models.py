@@ -25,6 +25,7 @@ class NodeClassifier(nn.Module):
         """
 
         x = self.gblocks(self.nodes)
+
         return self.cls(x)
 
 class GraphBlock(nn.Module):
@@ -67,5 +68,7 @@ class GraphBlock(nn.Module):
 
         if self.do:
             x = self.do(x)
+
+        # x = self.bn1(self.mixer(x))
 
         return x

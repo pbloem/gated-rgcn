@@ -10,12 +10,60 @@ from math import sqrt
 
 import util
 
+### Layers for unifying the different embedding vectors produced for each relation
 
+class SumUnify(nn.Module):
+    """
+    Baseline: just sum them.
+    """
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        n, r, e = x.size()
+        return F.relu(x.sum(dim=1))
+
+class AttentionUnify(nn.Module):
+    """
+    Compute an attention value for each relation
+    """
+    def __init__(self, r, e):
+        super().__init__()
+
+        self.weights = nn.Parameter(torch.randn(r, e).uniform_(-sqrt(e), sqrt(e)))
+        self.biases = nn.Parameter(torch.zeros(r, dtype=torch.float))
+
+    def forward(self, x):
+        n, r, e = x.size()
+
+        att = torch.einsum('ri, nri -> nr', self.weights, x)
+        att = torch.einsum('nr, r -> nr', att, self.biases)
+
+        att = F.softmax(att, dim=1)
+
+        return torch.einsum('nr, nri -> ni', att, x)
+
+class MLPUnify(nn.Module):
+    """
+    Compute an attention value for each relation
+    """
+    def __init__(self, r, e):
+        super().__init__()
+
+        self.lin = nn.Linear(r*e, e)
+
+    def forward(self, x):
+        n, r, e = x.size()
+        x = x.view(n, r*e)
+
+        return self.lin(x)
+
+### Mixer layers
 class GCN(nn.Module):
     """
     Graph convolution: node outputs are the average of all neighbors.
     """
-    def __init__(self, edges, n, emb=16, activation=F.relu, bases=None, **kwargs):
+    def __init__(self, edges, n, emb=16, bases=None, unify='sum', **kwargs):
 
         super().__init__()
 
@@ -39,7 +87,14 @@ class GCN(nn.Module):
             self.comps = nn.Parameter(torch.FloatTensor(r, bases).uniform_(-sqrt(bases), sqrt(bases)) )
             self.bases = nn.Parameter(torch.FloatTensor(bases, emb, emb).uniform_(-sqrt(emb), sqrt(emb)) )
 
-        self.activation = activation
+        if unify == 'sum':
+            self.unify = SumUnify()
+        elif unify == 'attention':
+            self.unify = AttentionUnify(r, emb)
+        elif unify == 'mlp':
+            self.unify = MLPUnify(r, emb)
+        else:
+            raise Exception(f'unify {unify} not recognized')
 
     def forward(self, x):
         """
@@ -53,7 +108,7 @@ class GCN(nn.Module):
         n, e = x.size()
 
         # Multiply adjacencies
-        h = torch.mm(self.graph, x)
+        h = torch.mm(self.graph, x) # sparse mm
         h = h.view(r, n, e) # new dim for the relations
 
         if self.bases is not None:
@@ -62,19 +117,17 @@ class GCN(nn.Module):
             weights = self.weights
 
         # Apply weights
-        h = torch.bmm(h, weights)
+        h = torch.einsum('rij, rnj -> nri', weights, h)
 
-        # sum out relations and apply activation
-        return self.activation(h.sum(dim=0))
+        return self.unify(h)
 
 class GAT(nn.Module):
     """
-    We apply one standard self attention (with multiple heads) to each relation, connecting only those nodes that are
-    connectedunder that relation
-
+    We apply one standard self attention (with multiple heads) to each relation, connecting only
+    those nodes that are connected under that relation
     """
 
-    def __init__(self, edges, n, emb=16, heads=4, norm_method='naive', **kwargs):
+    def __init__(self, edges, n, emb=16, heads=4, norm_method='naive', unify='sum', **kwargs):
         """
 
         :param graph:
@@ -114,6 +167,15 @@ class GAT(nn.Module):
         s, o = s + (p * n), o + (p * n)
         self.register_buffer('mindices', torch.cat([s[:, None], o[:, None]], dim=1))
         self.msize = (n*r, n*r)
+
+        if unify == 'sum':
+            self.unify_rels = SumUnify()
+        elif unify == 'attention':
+            self.unify_rels = AttentionUnify(r, emb)
+        elif unify == 'mlp':
+            self.unify_rels = MLPUnify(r, emb)
+        else:
+            raise Exception(f'unify {unify} not recognized')
 
     def forward(self, x):
         """
@@ -179,12 +241,4 @@ class GAT(nn.Module):
         output = torch.einsum('rij, nrj -> nri', self.unify, output)
 
         # unify the relations
-        output = output.sum(dim=1)
-
-        assert output.size() == (n, e)
-
-        return output
-
-        # print('So far so good.')
-        # sys.exit()
-
+        return self.unify_rels(output)

@@ -76,8 +76,8 @@ def adj(edges, num_nodes, cuda=False):
     indices = torch.tensor([from_indices, upto_indices], dtype=torch.long, device=d(cuda))
 
     assert indices.size(1) == sum([len(ed[0]) for _, ed in edges.items()])
-    assert indices[0, :].max() < size[0]
-    assert indices[1, :].max() < size[1]
+    assert indices[0, :].max() < size[0], f'{indices[0, :].max()}, {size}, {r}, {edges.keys()}'
+    assert indices[1, :].max() < size[1], f'{indices[1, :].max()}, {size}, {r}, {edges.keys()}'
 
     return indices.t(), size
 
