@@ -61,7 +61,7 @@ def go(arg):
 
         else:
             edges, (n2i, i2n), (r2i, i2r), train, test = \
-                kgmodels.load(arg.name, final=arg.final, limit=arg.limit, bidir=not arg.unidir)
+                kgmodels.load(arg.name, final=arg.final, limit=arg.limit, bidir=True)
 
             # Convert test and train to tensors
             train_idx = [n2i[name] for name, _ in train.items()]
