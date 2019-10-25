@@ -17,14 +17,20 @@ class NodeClassifier(nn.Module):
 
         self.cls = nn.Linear(emb, numcls)
 
-    def forward(self):
+    def forward(self, conditional=None):
         """
         Produces logits over classes for all nodes.
         :param x:
         :return:
         """
 
-        x = self.gblocks(self.nodes)
+        x = self.nodes
+
+        if conditional is not None:
+            conditional = x[conditional, :][None, :]
+
+        for block in self.gblocks:
+            x = block(x, conditional=conditional)
 
         return self.cls(x)
 
@@ -55,14 +61,14 @@ class GraphBlock(nn.Module):
 
         self.do = None if dropout is None else nn.Dropout(dropout)
 
-    def forward(self, x):
+    def forward(self, x, conditional=None):
         """
         :param x: N by E matrix of node embeddings.
 
         :return:
         """
 
-        x = self.bn1(self.mixer(x) + x)
+        x = self.bn1(self.mixer(x, conditional=conditional) + x)
 
         x = self.bn2(self.ff(x) + x)
 

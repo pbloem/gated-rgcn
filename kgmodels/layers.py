@@ -177,7 +177,7 @@ class GAT(nn.Module):
         else:
             raise Exception(f'unify {unify} not recognized')
 
-    def forward(self, x):
+    def forward(self, x, conditional=None):
         """
         :param x: E by N matrix of node embeddings.
         :return:
@@ -187,6 +187,9 @@ class GAT(nn.Module):
         h, r = self.heads, self.relations
         s = e // h
         ed, _ = self.mindices.size() # nr of edges total
+
+        if conditional is not None:
+            x = x + conditional
 
         x = x[:, None, :].expand(n, r, e) # expand for relations
         x = x.view(n, r, h, s)            # cut for attention heads

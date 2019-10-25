@@ -115,24 +115,21 @@ def go(arg):
 
             model.train(True)
 
-            opt.zero_grad()
+            # opt.zero_grad()
+            # cls = model()[train_idx, :]
+            # loss = F.cross_entropy(cls, train_lbl)
+            # loss.backward()
+            # opt.step()
 
-            cls = model()[train_idx, :]
+            for i, lbl in tqdm.tqdm(zip(train_idx, train_lbl), total=len(train_idx)):
 
-            # if True: # drop out a large proportion of the classifications
-            #     num = cls.size(0)
-            #     # mask = torch.FloatTensor(num, device=d()).uniform_() > 0.99
-            #     mask = torch.zeros((num, ), dtype=torch.bool)
-            #     mask[random.sample(range(num), 20)] = 5
-            #
-            #     cls_do = cls[mask, :]
-            #     train_lbl_do = train_lbl[mask]
-            #     loss = F.cross_entropy(cls_do, train_lbl_do)
-            # else:
-            loss = F.cross_entropy(cls, train_lbl)
+                opt.zero_grad()
 
-            loss.backward()
-            opt.step()
+                cls = model(conditional=i)[i, None, :]
+                loss = F.cross_entropy(cls, lbl[None])
+
+                loss.backward()
+                opt.step()
 
             prt(f'epoch {e},  loss {loss.item():.2}', end='')
 
@@ -140,18 +137,30 @@ def go(arg):
             with torch.no_grad():
 
                 model.train(False)
-                cls = model()[train_idx, :]
-                agreement = cls.argmax(dim=1) == train_lbl
-                accuracy = float(agreement.sum()) / agreement.size(0)
+                # cls = model()[train_idx, :]
+                # agreement = cls.argmax(dim=1) == train_lbl
+                # accuracy = float(agreement.sum()) / agreement.size(0)
+                correct = 0
+                for i, lbl in zip(train_idx, train_lbl):
+                    cls = model(conditional=i)[i, :].argmax()
+                    correct += int((lbl == cls))
 
+                accuracy = correct/len(train_idx)
                 prt(f',    train accuracy {float(accuracy):.2}', end='')
                 if e == arg.epochs - 1:
                     train_accs.append(float(accuracy))
 
-                cls = model()[test_idx, :]
-                agreement = cls.argmax(dim=1) == test_lbl
-                accuracy = float(agreement.sum()) / agreement.size(0)
+                # cls = model()[test_idx, :]
+                # agreement = cls.argmax(dim=1) == test_lbl
+                # accuracy = float(agreement.sum()) / agreement.size(0)
 
+                correct = 0
+                for i, lbl in zip(test_idx, test_lbl):
+
+                    cls = model(conditional=i)[i, :].argmax()
+                    correct += int((lbl == cls))
+
+                accuracy = correct / len(train_idx)
                 prt(f',   test accuracy {float(accuracy):.2}')
                 if e == arg.epochs - 1:
                     test_accs.append(float(accuracy))
@@ -220,14 +229,6 @@ if __name__ == "__main__":
 
     parser.add_argument("-F", "--final", dest="final",
                         help="Use the canonical test set instead of a validation split.",
-                        action="store_true")
-
-    parser.add_argument("-U", "--unidir", dest="unidir",
-                        help="Only model relations in one direction.",
-                        action="store_true")
-
-    parser.add_argument("--dense", dest="dense",
-                        help="Use a dense adjacency matrix with the canonical softmax.",
                         action="store_true")
 
     parser.add_argument("--limit",
