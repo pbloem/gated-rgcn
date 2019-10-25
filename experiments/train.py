@@ -125,7 +125,7 @@ def go(arg):
 
                 opt.zero_grad()
 
-                cls = model(conditional=i)[i, None, :]
+                cls = model(conditional=i if arg.cond else None)[i, None, :]
                 loss = F.cross_entropy(cls, lbl[None])
 
                 loss.backward()
@@ -142,7 +142,7 @@ def go(arg):
                 # accuracy = float(agreement.sum()) / agreement.size(0)
                 correct = 0
                 for i, lbl in zip(train_idx, train_lbl):
-                    cls = model(conditional=i)[i, :].argmax()
+                    cls = model(conditional=i if arg.cond else None)[i, :].argmax()
                     correct += int((lbl == cls))
 
                 accuracy = correct/len(train_idx)
@@ -157,7 +157,7 @@ def go(arg):
                 correct = 0
                 for i, lbl in zip(test_idx, test_lbl):
 
-                    cls = model(conditional=i)[i, :].argmax()
+                    cls = model(conditional=i if arg.cond else None)[i, :].argmax()
                     correct += int((lbl == cls))
 
                 accuracy = correct / len(train_idx)
@@ -285,6 +285,12 @@ if __name__ == "__main__":
                         dest="unify",
                         help="Method for unifying the relations.",
                         default='sum', type=str)
+
+
+    parser.add_argument("--conditional", dest="cond",
+                        help="Condition on the target node.",
+                        action="store_true")
+
 
     options = parser.parse_args()
 
