@@ -276,8 +276,6 @@ class SampleAll(nn.Module):
 
     def forward(self, batch_nodes, batch_edges, embeddings):
 
-        util.tic()
-
         b, n, e = embeddings.size()
         assert b == len(batch_nodes) == len(batch_edges)
 
@@ -294,8 +292,6 @@ class SampleAll(nn.Module):
 
             edges.update(inc_edges)
             nodes.update(nw_nodes)
-
-        print(f'samp {util.toc():.4} seconds')
 
         return batch_nodes, batch_edges, embeddings
 
@@ -396,8 +392,6 @@ class SimpleRGCN(nn.Module):
 
     def forward(self, batch_nodes, batch_edges, embeddings, global_attention=None):
 
-        util.tic()
-
         b, n, e = embeddings.size()
         r = self.r
 
@@ -416,24 +410,18 @@ class SimpleRGCN(nn.Module):
         fr = cflat[:, 0] + n * cflat[:, 1] + (n * r) * bflat
         to = cflat[:, 2] + n * bflat
         indices = torch.cat([fr[:, None], to[:, None]], dim=1)
-        print(f'rgcn.flat {util.toc():.4} seconds')
 
-        util.tic()
         # row normalize
         values = torch.ones((indices.size(0), ), device=d(), dtype=torch.float)
         values = values / util.sum_sparse(indices, values, (b * r * n, b * n))
-        print(f'rgcn.norm {util.toc():.4} seconds')
 
-        util.tic()
         # perform weighted message passing
         output = util.spmm(indices, values, (b * n * r, b * n), embeddings.reshape(-1, e))
-        print(f'rgcn.mult {util.toc():.4} seconds')
 
         assert output.size() == (b * n * r, e), f'{output.size()} {(b * n * r, e)}'
 
         output = output.view(b, r, n, e)
 
-        util.tic()
         if self.bases is not None:
             weights = torch.einsum('rb, bij -> rij', self.comps, self.bases)
         else:
@@ -441,14 +429,9 @@ class SimpleRGCN(nn.Module):
 
         # Apply weights
         output = torch.einsum('rij, brnj -> bnri', weights, output)
-        print(f'rgcn.wght {util.toc():.4} seconds')
 
-        util.tic()
         # unify the relations
         output = output.sum(dim=2)
         output = F.relu(output)
-
-        print(f'rgcn.rest {util.toc():.4} seconds')
-        print(f'rgcn {util.toc():.4} seconds')
 
         return batch_nodes, batch_edges, output
