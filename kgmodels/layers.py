@@ -2,6 +2,7 @@ import torch, os, sys
 
 from torch import nn
 from torch.nn import functional as F
+import torch.distributions as ds
 
 import layers
 
@@ -96,7 +97,7 @@ class GCN(nn.Module):
         else:
             raise Exception(f'unify {unify} not recognized')
 
-    def forward(self, x):
+    def forward(self, x, conditional=None):
         """
         :param x: E by N matrix of node embeddings.
 
@@ -106,6 +107,9 @@ class GCN(nn.Module):
         r = rn // n
 
         n, e = x.size()
+
+        if conditional is not None:
+            x = x + conditional
 
         # Multiply adjacencies
         h = torch.mm(self.graph, x) # sparse mm
@@ -123,11 +127,11 @@ class GCN(nn.Module):
 
 class GAT(nn.Module):
     """
-    We apply one standard self attention (with multiple heads) to each relation, connecting only
+    We apply one standard self-attention (with multiple heads) to each relation, connecting only
     those nodes that are connected under that relation
     """
 
-    def __init__(self, edges, n, emb=16, heads=4, norm_method='naive', unify='sum', **kwargs):
+    def __init__(self, edges, n, emb=16, heads=4, norm_method='naive', unify='sum', dropin=False, **kwargs):
         """
 
         :param graph:
@@ -142,6 +146,8 @@ class GAT(nn.Module):
         self.emb = emb
         self.heads = heads
         self.norm_method = norm_method
+
+        self.dropin = dropin
 
         s = emb//heads
         r = self.relations = len(edges.keys())
@@ -232,6 +238,11 @@ class GAT(nn.Module):
 
         assert not util.contains_inf(dot), f'dot contains inf (after softmax) {dot.min()}, {dot.mean()}, {dot.max()}'
         assert not util.contains_nan(dot), f'dot contains nan (after softmax) {dot.min()}, {dot.mean()}, {dot.max()}'
+
+        if self.dropin:
+            bern = ds.Bernoulli(dot)
+            mask = bern.sample()
+            dot = dot * mask
 
         values = values.view(h, r*n, s)
         output = util.batchmm(mindices, dot, self.msize, values)

@@ -84,29 +84,15 @@ def go(arg):
         """
         Define model
         """
-        model = kgmodels.NodeClassifier(edges=edges, n=N, depth=arg.depth, emb=arg.emb, mixer=arg.mixer, numcls=num_cls,
-                                        dropout=arg.do, bases=arg.bases, norm_method=arg.norm_method, heads=arg.heads,
-                                        unify=arg.unify, dropin=arg.dropin)
 
-        # cheat
-        # h, rn = arg.emb//2, range(arg.emb)
-        # model.nodes.data *= 0.0
-        # model.nodes.data[0, :h] += 1.0
-        # model.nodes.data[1, h:] += 1.0
-        # model.nodes.required_grad = False
-        #
-        # model.gblocks[0].mixer.weights.data[:, :, :] *= 0.0
-        # model.gblocks[0].mixer.weights.data[:2, rn, rn] += 1.0
-        # model.gblocks[0].mixer.weights.requires_grad = False
-        #
-        # model.gblocks[1].mixer.weights.data[:, :, :] *= 0.0
-        # model.gblocks[1].mixer.weights.data[:2, rn, rn] += 1.0
-        # model.gblocks[1].mixer.weights.requires_grad = False
+        train_idx, test_idx = [n.item() for n in train_idx], [n.item() for n in test_idx]
+
+        model = kgmodels.SamplingClassifier(edges=edges, n=N, depth=arg.depth, emb=arg.emb, max_edges=arg.max_edges, num_cls=num_cls, boost=arg.boost, bases=arg.bases)
 
         if torch.cuda.is_available():
             prt('Using CUDA.')
             model.cuda()
-            train_lbl = train_lbl.cuda()
+            train_lbl = train_lbl.cuda() # move to train loop if memory becomes tight
             test_lbl  = test_lbl.cuda()
 
         opt = torch.optim.AdamW(model.parameters(), lr=arg.lr, weight_decay=arg.wd)
@@ -115,20 +101,21 @@ def go(arg):
 
             model.train(True)
 
-            # opt.zero_grad()
-            # cls = model()[train_idx, :]
-            # loss = F.cross_entropy(cls, train_lbl)
-            # loss.backward()
-            # opt.step()
+            for fr in tqdm.trange(0, len(train_idx), arg.batch):
+                to = min(len(train_idx), fr + arg.batch)
 
-            for i, lbl in tqdm.tqdm(zip(train_idx, train_lbl), total=len(train_idx)):
+                inputs = train_idx[fr:to] # list, not a tensor
+                labels = train_lbl[fr:to]
 
                 opt.zero_grad()
 
-                cls = model(conditional=i if arg.cond else None)[i, None, :]
-                loss = F.cross_entropy(cls, lbl[None])
+                cls = model(inputs)
+                loss = F.cross_entropy(cls, labels)
 
                 loss.backward()
+
+                # print((model.embeddings.grad[:, 0] != 0.0).sum())
+
                 opt.step()
 
             prt(f'epoch {e},  loss {loss.item():.2}', end='')
@@ -137,28 +124,32 @@ def go(arg):
             with torch.no_grad():
 
                 model.train(False)
-                # cls = model()[train_idx, :]
-                # agreement = cls.argmax(dim=1) == train_lbl
-                # accuracy = float(agreement.sum()) / agreement.size(0)
+
                 correct = 0
-                for i, lbl in zip(train_idx, train_lbl):
-                    cls = model(conditional=i if arg.cond else None)[i, :].argmax()
-                    correct += int((lbl == cls))
+                for fr in range(0, len(train_idx), arg.batch*2):
+                    to = min(len(train_idx), fr + arg.batch)
+
+                    inputs = train_idx[fr:to]
+                    labels = train_lbl[fr:to]
+
+                    cls = model(inputs).argmax(dim=1)
+                    correct += int((labels == cls).sum())
 
                 accuracy = correct/len(train_idx)
                 prt(f',    train accuracy {float(accuracy):.2}', end='')
+
                 if e == arg.epochs - 1:
                     train_accs.append(float(accuracy))
 
-                # cls = model()[test_idx, :]
-                # agreement = cls.argmax(dim=1) == test_lbl
-                # accuracy = float(agreement.sum()) / agreement.size(0)
-
                 correct = 0
-                for i, lbl in zip(test_idx, test_lbl):
+                for fr in range(0, len(test_idx), arg.batch*2):
+                    to = min(len(train_idx), fr + arg.batch)
 
-                    cls = model(conditional=i if arg.cond else None)[i, :].argmax()
-                    correct += int((lbl == cls))
+                    inputs = test_idx[fr:to]
+                    labels = test_lbl[fr:to]
+
+                    cls = model(inputs).argmax(dim=1)
+                    correct += int((labels == cls).sum())
 
                 accuracy = correct / len(test_idx)
                 prt(f',   test accuracy {float(accuracy):.2}')
@@ -186,6 +177,11 @@ if __name__ == "__main__":
                         dest="epochs",
                         help="Size (nr of dimensions) of the input.",
                         default=150, type=int)
+
+    parser.add_argument("-b", "--batch-size",
+                        dest="batch",
+                        help="Size of training batches.",
+                        default=16, type=int)
 
     parser.add_argument("-d", "--depth",
                         dest="depth",
@@ -275,6 +271,16 @@ if __name__ == "__main__":
                         dest="fdiff",
                         help="Amount of diffusion in the fan graph.",
                         default=5, type=int)
+
+    parser.add_argument("--max-edges",
+                        dest="max_edges",
+                        help="Maximum number of edges in sampled graph.",
+                        default=250, type=int)
+
+    parser.add_argument("--boost",
+                        dest="boost",
+                        help="Num added to the global attention scores, before they go into the sigmoid for sampling. Higher boost causes more incident edges to be sampled and fewer deep ones.",
+                        default=0, type=int)
 
     parser.add_argument("--nm",
                         dest="norm_method",

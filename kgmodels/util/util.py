@@ -1,10 +1,20 @@
-import torch, os, sys
+import torch, os, sys, time
 
 from torch.autograd import Variable
 import torch.nn.functional as F
 
 from collections.abc import Iterable
 
+tics = []
+
+def tic():
+    tics.append(time.time())
+
+def toc():
+    if len(tics)==0:
+        return None
+    else:
+        return time.time()-tics.pop()
 
 def mask_(matrices, maskval=0.0, mask_diagonal=True):
     """
@@ -86,6 +96,7 @@ def sparsemm(use_cuda):
     :param use_cuda:
     :return:
     """
+
     return SparseMMGPU.apply if use_cuda else SparseMMCPU.apply
 
 class SparseMMCPU(torch.autograd.Function):
@@ -158,6 +169,13 @@ class SparseMMGPU(torch.autograd.Function):
 
         grad_xmatrix = torch.mm(ctx.matrix.t(), grad_output)
         return None, Variable(grad_values), None, Variable(grad_xmatrix)
+
+def spmm(indices, values, size, xmatrix):
+
+    cuda = indices.is_cuda
+
+    sm = sparsemm(cuda)
+    return sm(indices.t(), values, size, xmatrix)
 
 def batchmm(indices, values, size, xmatrix, cuda=None):
     """
@@ -254,7 +272,7 @@ def intlist(tensor):
     :param tensor:
     :return:
     """
-    if type(tensor) is list:
+    if type(tensor) is list or type(tensor) is tuple:
         return tensor
 
     tensor = tensor.squeeze()
