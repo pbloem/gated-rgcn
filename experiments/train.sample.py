@@ -87,7 +87,8 @@ def go(arg):
 
         train_idx, test_idx = [n.item() for n in train_idx], [n.item() for n in test_idx]
 
-        model = kgmodels.SamplingClassifier(edges=edges, n=N, depth=arg.depth, emb=arg.emb, max_edges=arg.max_edges, num_cls=num_cls, boost=arg.boost, bases=arg.bases)
+        model = kgmodels.SamplingClassifier(edges=edges, n=N, depth=arg.depth, emb=arg.emb, max_edges=arg.max_edges,
+                num_cls=num_cls, boost=arg.boost, bases=arg.bases, maskid=arg.maskid)
 
         if torch.cuda.is_available():
             prt('Using CUDA.')
@@ -302,6 +303,10 @@ if __name__ == "__main__":
 
     parser.add_argument("--dropin", dest="dropin",
                         help="Randomly mask out connections by atte tion weight.",
+                        action="store_true")
+
+    parser.add_argument("--mask-id", dest="maskid",
+                        help="Mask out the embedding of the node being classified.",
                         action="store_true")
 
     options = parser.parse_args()

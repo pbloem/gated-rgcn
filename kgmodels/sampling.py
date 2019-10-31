@@ -57,10 +57,12 @@ def convert(edges, num_nodes):
 
 class SamplingClassifier(nn.Module):
 
-    def __init__(self, edges, n, num_cls, depth=2, emb=16, max_edges=37, boost=0, bases=None):
+    def __init__(self, edges, n, num_cls, depth=2, emb=16, max_edges=37, boost=0, bases=None, maskid=False):
         super().__init__()
 
         self.r, self.n, self.max_edges = len(edges.keys()), n, max_edges
+        self.maskid = maskid
+
         self.edges = convert(edges, n)
 
         # layers  = [SamplingRGCN(self.edges, self.r, emb, max_edges, boost=boost, sample=True, convolve=False) for _ in range(depth)]
@@ -86,6 +88,11 @@ class SamplingClassifier(nn.Module):
 
         max = self.max_edges
         embeddings = self.embeddings[None, :, :].expand(b, n, e)
+        if self.maskid:
+            ones = torch.ones(size=embeddings.size(), device=d(), dtype=torch.float)
+            ones[range(b), entities, :] *= 0.0
+            embeddings = embeddings * ones
+
         # -- maybe some room for optimization here if we include only the relevant nodes
 
         for layer in self.layers:
