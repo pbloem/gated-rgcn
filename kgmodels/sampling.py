@@ -57,7 +57,7 @@ def convert(edges, num_nodes):
 
 class SamplingClassifier(nn.Module):
 
-    def __init__(self, edges, n, num_cls, depth=2, emb=16, max_edges=37, boost=0, bases=None, maskid=False):
+    def __init__(self, edges, n, num_cls, depth=2, emb=16, max_edges=37, boost=0, bases=None, maskid=False, dropout=None):
         super().__init__()
 
         self.r, self.n, self.max_edges = len(edges.keys()), n, max_edges
@@ -69,7 +69,7 @@ class SamplingClassifier(nn.Module):
         # layers += [SamplingRGCN(self.edges, self.r, emb, max_edges, boost=boost, sample=False, convolve=True) for _ in range(depth)]
 
         layers =  [SampleAll(self.edges) for _ in range(depth)]
-        layers += [SimpleRGCN(self.edges, self.r, emb, bases=bases) for _ in range(depth)]
+        layers += [SimpleRGCN(self.edges, self.r, emb, bases=bases, dropout=dropout) for _ in range(depth)]
 
         self.layers = nn.ModuleList(modules=layers)
         self.embeddings = nn.Parameter(torch.FloatTensor(n, emb).uniform_(-sqrt(emb), sqrt(emb)))
@@ -385,7 +385,7 @@ class SimpleRGCN(nn.Module):
     Basic RGCN on subgraphs. Ignores global attention, and performs simple message passing
     """
 
-    def __init__(self, graph, r, emb, bases=None):
+    def __init__(self, graph, r, emb, bases=None, dropout=None):
         super().__init__()
 
         self.r = r
@@ -396,6 +396,8 @@ class SimpleRGCN(nn.Module):
         else:
             self.comps = nn.Parameter(torch.FloatTensor(r, bases).uniform_(-sqrt(bases), sqrt(bases)) )
             self.bases = nn.Parameter(torch.FloatTensor(bases, emb, emb).uniform_(-sqrt(emb), sqrt(emb)) )
+
+        self.dropout = None if dropout is None else nn.Dropout(dropout)
 
     def forward(self, batch_nodes, batch_edges, embeddings, global_attention=None):
 
@@ -440,5 +442,8 @@ class SimpleRGCN(nn.Module):
         # unify the relations
         output = output.sum(dim=2)
         output = F.relu(output)
+
+        if self.dropout is not None:
+            output = self.dropout(output)
 
         return batch_nodes, batch_edges, output
