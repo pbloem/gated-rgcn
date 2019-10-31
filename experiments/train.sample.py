@@ -101,6 +101,7 @@ def go(arg):
 
             model.train(True)
 
+            correct = 0
             for fr in tqdm.trange(0, len(train_idx), arg.batch):
                 to = min(len(train_idx), fr + arg.batch)
 
@@ -110,15 +111,18 @@ def go(arg):
                 opt.zero_grad()
 
                 cls = model(inputs)
+
+                correct += (cls.argmax(dim=1) == labels).sum().item()
                 loss = F.cross_entropy(cls, labels)
-
                 loss.backward()
-
-                # print((model.embeddings.grad[:, 0] != 0.0).sum())
+                #
+                # print((model.layers[2].weights.grad).mean())
+                # print((model.layers[3].weights.grad).mean())
 
                 opt.step()
 
             prt(f'epoch {e},  loss {loss.item():.2}', end='')
+            prt(f',    train cumulative {float(correct/len(train_idx)):.2} ({correct}/{len(train_idx)})', end='')
 
             # Evaluate
             with torch.no_grad():
@@ -127,7 +131,7 @@ def go(arg):
 
                 correct = 0
                 for fr in range(0, len(train_idx), arg.batch*2):
-                    to = min(len(train_idx), fr + arg.batch)
+                    to = min(len(train_idx), fr + arg.batch*2)
 
                     inputs = train_idx[fr:to]
                     labels = train_lbl[fr:to]
@@ -136,14 +140,14 @@ def go(arg):
                     correct += int((labels == cls).sum())
 
                 accuracy = correct/len(train_idx)
-                prt(f',    train accuracy {float(accuracy):.2}', end='')
+                prt(f',    train accuracy {float(accuracy):.2} ({correct}/{len(train_idx)})', end='')
 
                 if e == arg.epochs - 1:
                     train_accs.append(float(accuracy))
 
                 correct = 0
                 for fr in range(0, len(test_idx), arg.batch*2):
-                    to = min(len(train_idx), fr + arg.batch)
+                    to = min(len(test_idx), fr + arg.batch*2)
 
                     inputs = test_idx[fr:to]
                     labels = test_lbl[fr:to]
@@ -152,7 +156,7 @@ def go(arg):
                     correct += int((labels == cls).sum())
 
                 accuracy = correct / len(test_idx)
-                prt(f',   test accuracy {float(accuracy):.2}')
+                prt(f',   test accuracy {float(accuracy):.2} ({correct}/{len(test_idx)})')
                 if e == arg.epochs - 1:
                     test_accs.append(float(accuracy))
 

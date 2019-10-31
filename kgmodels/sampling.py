@@ -92,7 +92,9 @@ class SamplingClassifier(nn.Module):
             batch_nodes, batch_edges, embeddings = layer(batch_nodes, batch_edges, embeddings)
 
         pooled = embeddings[range(b), entities, :]
-        return self.cls(pooled) # (b, num_cls)
+        c = self.cls(pooled) # (b, num_cls)
+
+        return c
 
 class SamplingRGCN(nn.Module):
     """
@@ -287,14 +289,12 @@ class SampleAll(nn.Module):
             for node in nodes:
                 inc_edges.update(self.graph[node])
 
-            # remove already sampled edges
             nw_nodes = [s for s, _, _ in inc_edges] + [o for _, _, o in inc_edges]
 
             edges.update(inc_edges)
             nodes.update(nw_nodes)
 
         return batch_nodes, batch_edges, embeddings
-
 
 class SampleGA(nn.Module):
     """
@@ -415,7 +415,7 @@ class SimpleRGCN(nn.Module):
         values = torch.ones((indices.size(0), ), device=d(), dtype=torch.float)
         values = values / util.sum_sparse(indices, values, (b * r * n, b * n))
 
-        # perform weighted message passing
+        # perform message passing
         output = util.spmm(indices, values, (b * n * r, b * n), embeddings.reshape(-1, e))
 
         assert output.size() == (b * n * r, e), f'{output.size()} {(b * n * r, e)}'
