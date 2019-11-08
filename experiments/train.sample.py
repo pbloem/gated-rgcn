@@ -143,11 +143,8 @@ def go(arg):
                         cls = model(inputs).argmax(dim=1)
                         correct += int((labels == cls).sum())
 
-                    accuracy = correct/len(train_idx)
-                    prt(f',    train accuracy {float(accuracy):.2} ({correct}/{len(train_idx)})', end='')
-
-                    if e == arg.epochs - 1:
-                        train_accs.append(float(accuracy))
+                    trn_accuracy = correct/len(train_idx)
+                    prt(f',    train accuracy {float(trn_accuracy):.2} ({correct}/{len(train_idx)})', end='')
 
                     correct = 0
                     for fr in range(0, len(test_idx), arg.batch*2):
@@ -159,15 +156,15 @@ def go(arg):
                         cls = model(inputs).argmax(dim=1)
                         correct += int((labels == cls).sum())
 
-                    accuracy = correct / len(test_idx)
-                    prt(f',   test accuracy {float(accuracy):.2} ({correct}/{len(test_idx)})')
+                    tst_accuracy = correct / len(test_idx)
+                    prt(f',   test accuracy {float(tst_accuracy):.2} ({correct}/{len(test_idx)})')
 
             if torch.cuda.is_available():
                 del loss # clear memory
                 torch.cuda.empty_cache()
 
-        if e == arg.epochs - 1:
-            test_accs.append(float(accuracy))
+        train_accs.append(float(trn_accuracy))
+        test_accs.append(float(tst_accuracy))
 
             # print(model.gblocks[0].mixer.weights.mean(-1).mean(-1))
 
