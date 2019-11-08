@@ -161,12 +161,13 @@ def go(arg):
 
                     accuracy = correct / len(test_idx)
                     prt(f',   test accuracy {float(accuracy):.2} ({correct}/{len(test_idx)})')
-                    if e == arg.epochs - 1:
-                        test_accs.append(float(accuracy))
 
             if torch.cuda.is_available():
                 del loss # clear memory
                 torch.cuda.empty_cache()
+
+        if e == arg.epochs - 1:
+            test_accs.append(float(accuracy))
 
             # print(model.gblocks[0].mixer.weights.mean(-1).mean(-1))
 
