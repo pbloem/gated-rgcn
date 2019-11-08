@@ -103,7 +103,7 @@ def go(arg):
             model.train(True)
 
             correct = 0
-            for fr in tqdm.trange(0, len(train_idx), arg.batch):
+            for fr in range(0, len(train_idx), arg.batch):
                 to = min(len(train_idx), fr + arg.batch)
 
                 inputs = train_idx[fr:to] # list, not a tensor
@@ -119,47 +119,50 @@ def go(arg):
                 #
                 # print((model.layers[2].weights.grad).mean())
                 # print((model.layers[3].weights.grad).mean())
+                # sys.exit()
 
                 opt.step()
 
-            prt(f'epoch {e},  loss {loss.item():.2}', end='')
-            prt(f',    train cumulative {float(correct/len(train_idx)):.2} ({correct}/{len(train_idx)})', end='')
-
             # Evaluate
-            with torch.no_grad():
+            if e % 5 == 0:
 
-                model.train(False)
+                prt(f'epoch {e},  loss {loss.item():.2}', end='')
+                prt(f',    train cumulative {float(correct / len(train_idx)):.2} ({correct}/{len(train_idx)})', end='')
 
-                correct = 0
-                for fr in range(0, len(train_idx), arg.batch*2):
-                    to = min(len(train_idx), fr + arg.batch*2)
+                with torch.no_grad():
 
-                    inputs = train_idx[fr:to]
-                    labels = train_lbl[fr:to]
+                    model.train(False)
 
-                    cls = model(inputs).argmax(dim=1)
-                    correct += int((labels == cls).sum())
+                    correct = 0
+                    for fr in range(0, len(train_idx), arg.batch*2):
+                        to = min(len(train_idx), fr + arg.batch*2)
 
-                accuracy = correct/len(train_idx)
-                prt(f',    train accuracy {float(accuracy):.2} ({correct}/{len(train_idx)})', end='')
+                        inputs = train_idx[fr:to]
+                        labels = train_lbl[fr:to]
 
-                if e == arg.epochs - 1:
-                    train_accs.append(float(accuracy))
+                        cls = model(inputs).argmax(dim=1)
+                        correct += int((labels == cls).sum())
 
-                correct = 0
-                for fr in range(0, len(test_idx), arg.batch*2):
-                    to = min(len(test_idx), fr + arg.batch*2)
+                    accuracy = correct/len(train_idx)
+                    prt(f',    train accuracy {float(accuracy):.2} ({correct}/{len(train_idx)})', end='')
 
-                    inputs = test_idx[fr:to]
-                    labels = test_lbl[fr:to]
+                    if e == arg.epochs - 1:
+                        train_accs.append(float(accuracy))
 
-                    cls = model(inputs).argmax(dim=1)
-                    correct += int((labels == cls).sum())
+                    correct = 0
+                    for fr in range(0, len(test_idx), arg.batch*2):
+                        to = min(len(test_idx), fr + arg.batch*2)
 
-                accuracy = correct / len(test_idx)
-                prt(f',   test accuracy {float(accuracy):.2} ({correct}/{len(test_idx)})')
-                if e == arg.epochs - 1:
-                    test_accs.append(float(accuracy))
+                        inputs = test_idx[fr:to]
+                        labels = test_lbl[fr:to]
+
+                        cls = model(inputs).argmax(dim=1)
+                        correct += int((labels == cls).sum())
+
+                    accuracy = correct / len(test_idx)
+                    prt(f',   test accuracy {float(accuracy):.2} ({correct}/{len(test_idx)})')
+                    if e == arg.epochs - 1:
+                        test_accs.append(float(accuracy))
 
             if torch.cuda.is_available():
                 del loss # clear memory

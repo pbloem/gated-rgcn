@@ -55,6 +55,116 @@ def convert(edges, num_nodes):
 
     return res
 
+class Batch():
+    """
+    Maintains all relevant information about a batch of subgraphs.
+    """
+
+    def __init__(self, entities, graph, embeddings, maskid=False):
+
+        n, e = embeddings.size()
+
+        self.entities = entities
+
+        self.nodesets = [set([node]) for node in entities]
+        self.edgesets = [set() for _ in entities]
+
+        # mapping from node indices in the batch graph to indices in the original graph
+        self.toind = [(bi, ent) for bi, ent in enumerate(entities)]
+        self.frind = {(bi, e):i for i, (bi, ent) in enumerate(self.toind)}
+
+        self.graph = graph
+
+        self.orig_embeddings = embeddings
+
+        self.node_emb = torch.zeros((len(entities), e), dtype=torch.float, device=d()) if maskid else embeddings[entities]
+
+        # edges of all subgraphs, with local node indices
+        self.edges   = []
+        self.weights = None
+
+    def size(self):
+        """
+        Number of batches
+        :return:
+        """
+        return len(self.edgesets)
+
+    def inc_edges(self, bi, prune=True):
+
+        inc_edges = set()
+
+        # print(self.nodesets[bi])
+        for node in self.nodesets[bi]:
+            inc_edges.update(self.graph[node])
+
+        if prune:
+            return self.prune(inc_edges, bi)
+        return inc_edges
+
+    def add_edges(self, edges, bi, weights=None):
+
+        new_nodes = set()
+
+        for (s, p, o) in edges:
+            if s not in self.nodesets[bi]:
+                new_nodes.add(s)
+            if o not in self.nodesets[bi]:
+                new_nodes.add(o)
+
+        new_nodes = list(new_nodes)
+
+        self.toind += [(bi, n) for n in new_nodes]
+        self.node_emb = torch.cat([self.node_emb, self.orig_embeddings[new_nodes, :]], dim=0)
+        self.frind = { (bj, e):i for i, (bj, e) in enumerate(self.toind)}
+        self.nodesets[bi].update(new_nodes)
+
+        self.edgesets[bi].update(edges)
+
+        for s, p, o in edges:
+            self.edges.append((self.frind[(bi, s)], p, self.frind[(bi, o)]))
+
+        if weights is not None:
+            self.weights = torch.cat([self.weights, weights], dim=0) if self.weights is not None else weights
+
+    def prune(self, edges, bi):
+        """
+        Removes any edges that are already in the batch.
+        :param edges:
+        :return:
+        """
+
+        result = set()
+        for edge in edges:
+            if edge not in self.edgesets[bi]:
+                result.add(edge)
+
+        return result
+
+    def cflat(self):
+        """
+        Returns an (n, 3) tensor representing the currently selected triples,
+        in batch coordinates
+        :return:
+        """
+
+        return torch.tensor(self.edges, dtype=torch.long, device=d())
+
+    def embeddings(self):
+        """
+        Returns embeddings for the current node selection.
+        :return:
+        """
+
+        return self.node_emb
+
+    def num_nodes(self):
+        """
+        Number of nodes in the batch graph.
+        :return:
+        """
+        return self.node_emb.size(0)
+
 class SamplingClassifier(nn.Module):
 
     def __init__(self, edges, n, num_cls, depth=2, emb=16, max_edges=37, boost=0, bases=None, maskid=False, dropout=None):
@@ -63,13 +173,13 @@ class SamplingClassifier(nn.Module):
         self.r, self.n, self.max_edges = len(edges.keys()), n, max_edges
         self.maskid = maskid
 
-        self.edges = convert(edges, n)
+        self.graph = convert(edges, n)
 
         # layers  = [SamplingRGCN(self.edges, self.r, emb, max_edges, boost=boost, sample=True, convolve=False) for _ in range(depth)]
         # layers += [SamplingRGCN(self.edges, self.r, emb, max_edges, boost=boost, sample=False, convolve=True) for _ in range(depth)]
 
-        layers =  [SampleAll(self.edges) for _ in range(depth)]
-        layers += [SimpleRGCN(self.edges, self.r, emb, bases=bases, dropout=dropout) for _ in range(depth)]
+        layers =  [SampleAll(self.graph) for _ in range(depth)]
+        layers += [SimpleRGCN(self.graph, self.r, emb, bases=bases, dropout=dropout) for _ in range(depth)]
 
         self.layers = nn.ModuleList(modules=layers)
         self.embeddings = nn.Parameter(torch.FloatTensor(n, emb).uniform_(-sqrt(emb), sqrt(emb)))
@@ -78,27 +188,16 @@ class SamplingClassifier(nn.Module):
 
     def forward(self, batch_nodes : List[int]):
 
-        entities = batch_nodes
-
-        batch_nodes = [set([node]) for node in batch_nodes]
-        batch_edges = [set() for _ in batch_nodes]
-
         b = len(batch_nodes)
-        n, e = self.embeddings.size()
 
-        max = self.max_edges
-        embeddings = self.embeddings[None, :, :].expand(b, n, e)
-        if self.maskid:
-            ones = torch.ones(size=embeddings.size(), device=d(), dtype=torch.float)
-            ones[range(b), entities, :] *= 0.0
-            embeddings = embeddings * ones
+        # TODO maskid
 
-        # -- maybe some room for optimization here if we include only the relevant nodes
+        batch = Batch(batch_nodes, self.graph, self.embeddings, maskid=self.maskid)
 
-        for layer in self.layers:
-            batch_nodes, batch_edges, embeddings = layer(batch_nodes, batch_edges, embeddings)
+        for i, layer in enumerate(self.layers):
+            batch = layer(batch)
 
-        pooled = embeddings[range(b), entities, :]
+        pooled = batch.embeddings()[:b, :]
         c = self.cls(pooled) # (b, num_cls)
 
         return c
@@ -273,7 +372,7 @@ class SamplingRGCN(nn.Module):
 
         return batch_nodes, batch_edges, output
 
-class SampleAll(nn.Module):
+class SampleAllOld(nn.Module):
     """
     Extends a list of instance-subgraphs with all incident edges.
     """
@@ -302,6 +401,26 @@ class SampleAll(nn.Module):
             nodes.update(nw_nodes)
 
         return batch_nodes, batch_edges, embeddings
+
+class SampleAll(nn.Module):
+    """
+    Extends a list of instance-subgraphs with all incident edges.
+    """
+
+    def __init__(self, graph):
+        super().__init__()
+
+        self.graph = graph
+
+    def forward(self, batch : Batch):
+
+        b = batch.size()
+
+        for bi in range(b):
+            candidates = batch.inc_edges(bi)
+            batch.add_edges(candidates, bi)
+
+        return batch
 
 class SampleGA(nn.Module):
     """
@@ -381,6 +500,66 @@ class SampleGA(nn.Module):
         return batch_nodes, batch_edges, embeddings
 
 class SimpleRGCN(nn.Module):
+    """
+    Basic RGCN on subgraphs. Ignores global attention, and performs simple message passing
+    """
+
+    def __init__(self, graph, r, emb, bases=None, dropout=None):
+        super().__init__()
+
+        self.r, self.emb = r, emb
+
+        if bases is None:
+            self.weights = nn.Parameter(torch.FloatTensor(r, emb, emb).uniform_(-sqrt(emb), sqrt(emb)) )
+            self.bases = None
+        else:
+            self.comps = nn.Parameter(torch.FloatTensor(r, bases).uniform_(-sqrt(bases), sqrt(bases)) )
+            self.bases = nn.Parameter(torch.FloatTensor(bases, emb, emb).uniform_(-sqrt(emb), sqrt(emb)) )
+
+        self.dropout = None if dropout is None else nn.Dropout(dropout)
+
+    def forward(self, batch):
+
+        n, r, e = batch.num_nodes(), self.r, self.emb
+        cflat = batch.cflat()
+
+        # convert to sparse matrix
+        fr = cflat[:, 0] + n * cflat[:, 1]
+        to = cflat[:, 2]
+        indices = torch.cat([fr[:, None], to[:, None]], dim=1)
+
+        # row normalize
+        values = torch.ones((indices.size(0), ), device=d(), dtype=torch.float)
+        values = values / util.sum_sparse(indices, values, (r * n, n))
+
+        # perform message passing
+        output = util.spmm(indices, values, (n * r, n), batch.embeddings())
+
+        assert output.size() == (r * n, e), f'{output.size()} {(r * n, e)}'
+
+        output = output.view(r, n, e)
+
+        if self.bases is not None:
+            weights = torch.einsum('rb, bij -> rij', self.comps, self.bases)
+        else:
+            weights = self.weights
+
+        # Apply weights
+        output = torch.einsum('rij, rnj -> nri', weights, output)
+
+        # unify the relations
+        output = output.sum(dim=1)
+        output = F.relu(output)
+
+        if self.dropout is not None:
+            output = self.dropout(output)
+
+        assert batch.embeddings().size() == output.size(), f'{batch.embeddings().size()} {output.size()}'
+        batch.node_emb = output
+
+        return batch
+
+class SimpleRGCNOld(nn.Module):
     """
     Basic RGCN on subgraphs. Ignores global attention, and performs simple message passing
     """
