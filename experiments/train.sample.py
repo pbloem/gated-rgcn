@@ -54,11 +54,6 @@ def go(arg):
                 kgmodels.fan(depth=arg.rdepth, diffusion=arg.fdiff, others=1000)
             num_cls = 2
 
-            # print(f'Generated random graph with {N} nodes.')
-
-            # print(list(zip(* (edges[0]))) )
-            # sys.exit()
-
         else:
             edges, (n2i, i2n), (r2i, i2r), train, test = \
                 kgmodels.load(arg.name, final=arg.final, limit=arg.limit, bidir=True)
@@ -116,10 +111,6 @@ def go(arg):
                 correct += (cls.argmax(dim=1) == labels).sum().item()
                 loss = F.cross_entropy(cls, labels)
                 loss.backward()
-                #
-                # print((model.layers[2].weights.grad).mean())
-                # print((model.layers[3].weights.grad).mean())
-                # sys.exit()
 
                 opt.step()
 

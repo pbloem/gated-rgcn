@@ -94,7 +94,6 @@ class Batch():
 
         inc_edges = set()
 
-        # print(self.nodesets[bi])
         for node in self.nodesets[bi]:
             inc_edges.update(self.graph[node])
 
@@ -416,9 +415,6 @@ class SampleAll(nn.Module):
         for bi in range(b):
             candidates = batch.inc_edges(bi)
             batch.add_edges(candidates, bi)
-
-        print(batch.edges)
-        sys.exit()
 
         return batch
 
