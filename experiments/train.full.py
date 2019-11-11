@@ -20,8 +20,12 @@ import rgat
 
 from argparse import ArgumentParser
 
-EPSILON = 0.000000001
+"""
+Full batch training GAT and RGCN
 
+"""
+
+EPSILON = 0.000000001
 
 global repeats
 
@@ -115,21 +119,13 @@ def go(arg):
 
             model.train(True)
 
-            # opt.zero_grad()
-            # cls = model()[train_idx, :]
-            # loss = F.cross_entropy(cls, train_lbl)
-            # loss.backward()
-            # opt.step()
+            opt.zero_grad()
 
-            for i, lbl in tqdm.tqdm(zip(train_idx, train_lbl), total=len(train_idx)):
+            cls = model()[train_idx, :]
+            loss = F.cross_entropy(cls, train_lbl)
+            loss.backward()
 
-                opt.zero_grad()
-
-                cls = model(conditional=i if arg.cond else None)[i, None, :]
-                loss = F.cross_entropy(cls, lbl[None])
-
-                loss.backward()
-                opt.step()
+            opt.step()
 
             prt(f'epoch {e},  loss {loss.item():.2}', end='')
 
@@ -137,30 +133,18 @@ def go(arg):
             with torch.no_grad():
 
                 model.train(False)
-                # cls = model()[train_idx, :]
-                # agreement = cls.argmax(dim=1) == train_lbl
-                # accuracy = float(agreement.sum()) / agreement.size(0)
-                correct = 0
-                for i, lbl in zip(train_idx, train_lbl):
-                    cls = model(conditional=i if arg.cond else None)[i, :].argmax()
-                    correct += int((lbl == cls))
+                cls = model()[train_idx, :]
+                agreement = cls.argmax(dim=1) == train_lbl
+                accuracy = float(agreement.sum()) / agreement.size(0)
 
-                accuracy = correct/len(train_idx)
                 prt(f',    train accuracy {float(accuracy):.2}', end='')
                 if e == arg.epochs - 1:
                     train_accs.append(float(accuracy))
 
-                # cls = model()[test_idx, :]
-                # agreement = cls.argmax(dim=1) == test_lbl
-                # accuracy = float(agreement.sum()) / agreement.size(0)
+                cls = model()[test_idx, :]
+                agreement = cls.argmax(dim=1) == test_lbl
+                accuracy = float(agreement.sum()) / agreement.size(0)
 
-                correct = 0
-                for i, lbl in zip(test_idx, test_lbl):
-
-                    cls = model(conditional=i if arg.cond else None)[i, :].argmax()
-                    correct += int((lbl == cls))
-
-                accuracy = correct / len(test_idx)
                 prt(f',   test accuracy {float(accuracy):.2}')
                 if e == arg.epochs - 1:
                     test_accs.append(float(accuracy))
@@ -190,7 +174,7 @@ if __name__ == "__main__":
     parser.add_argument("-d", "--depth",
                         dest="depth",
                         help="Nr of attention layers.",
-                        default=4, type=int)
+                        default=2, type=int)
 
     parser.add_argument("-E", "--embedding-size",
                         dest="emb",

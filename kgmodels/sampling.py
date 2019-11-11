@@ -175,9 +175,6 @@ class SamplingClassifier(nn.Module):
 
         self.graph = convert(edges, n)
 
-        # layers  = [SamplingRGCN(self.edges, self.r, emb, max_edges, boost=boost, sample=True, convolve=False) for _ in range(depth)]
-        # layers += [SamplingRGCN(self.edges, self.r, emb, max_edges, boost=boost, sample=False, convolve=True) for _ in range(depth)]
-
         layers =  [SampleAll(self.graph) for _ in range(depth)]
         layers += [SimpleRGCN(self.graph, self.r, emb, bases=bases, dropout=dropout) for _ in range(depth)]
 
@@ -419,6 +416,9 @@ class SampleAll(nn.Module):
         for bi in range(b):
             candidates = batch.inc_edges(bi)
             batch.add_edges(candidates, bi)
+
+        print(batch.edges)
+        sys.exit()
 
         return batch
 

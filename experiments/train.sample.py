@@ -166,7 +166,7 @@ def go(arg):
         train_accs.append(float(trn_accuracy))
         test_accs.append(float(tst_accuracy))
 
-            # print(model.gblocks[0].mixer.weights.mean(-1).mean(-1))
+        # print(model.gblocks[0].mixer.weights.mean(-1).mean(-1))
 
     print('training finished.')
 
