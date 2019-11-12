@@ -182,8 +182,8 @@ if __name__ == "__main__":
 
     parser.add_argument("-d", "--depth",
                         dest="depth",
-                        help="Nr of attention layers.",
-                        default=4, type=int)
+                        help="NR of hops into the network.",
+                        default=2, type=int)
 
     parser.add_argument("-E", "--embedding-size",
                         dest="emb",
