@@ -430,11 +430,73 @@ class SampleAll(nn.Module):
                 oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
                 dots = (semb * pemb * oemb).sum(dim=1) / sqrt(e)
 
-                weights = torch.sigmoid(dots)
+                weights = dots
             else:
                 weights = None
 
             batch.add_edges(candidates, bi, weights=weights)
+
+        return batch
+
+class Sample(nn.Module):
+    """
+    Extends a subgraph batch by computing global self attention scores and sampling accoridng to their magnitude
+    """
+
+    def __init__(self, graph, nodes=None, relations=None, tokeys=None, toqueries=None, max_edges=200, boost=0.0):
+        super().__init__()
+
+        self.graph = graph
+
+        self.nodes = nodes
+        self.relations = relations
+        self.tokeys    = tokeys
+        self.toqueries = toqueries
+
+        self.max_edges = max_edges
+        self.boost = boost
+
+    def forward(self, batch : Batch):
+
+        b = batch.size()
+        n, e = batch.embeddings().size()
+
+        for bi in range(b):
+
+            # we can sample this many edges (the total maximum minus the number that have already been sampled)
+            max_edges = self.max_edges - len(batch.edgesets[bi])
+
+            candidates = batch.inc_edges(bi)
+            embeddings = torch.cat([batch.embeddings(), self.nodes], dim=0) # probably expensive
+
+            cflat = list(candidates)
+
+            si, pi, oi = [s for s, _, _ in cflat], [p for _, p, _ in cflat], [o for _, _, o in cflat]
+            si, oi = batch.batch_indices(si), batch.batch_indices(oi)
+
+            semb, pemb, oemb, = embeddings[si, :], self.relations[pi, :], embeddings[oi, :]
+
+            # compute the score (bilinear dot product)
+            semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
+            oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
+            dots = (semb * pemb * oemb).sum(dim=1) / sqrt(e)
+
+            # sort by score (this allows us to cut off the low-scoring edges if we sample too many)
+            dots, indices = torch.sort(dots, descending=True)
+
+            # sample candidates by score
+            bern = ds.Bernoulli(torch.sigmoid(dots + self.boost))
+            mask = bern.sample().to(torch.bool)  # note that this is detached, no gradient here.
+
+            # cutt off the low scoring edges
+            if mask.sum() > max_edges:
+                # find the cutoff point
+                cs = mask.cumsum(dim=0) <= max_edges
+                mask = mask * cs
+
+            # reverse-sort the dots and mask
+
+            batch.add_edges(candidates, bi, weights=dots)
 
         return batch
 
