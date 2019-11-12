@@ -196,7 +196,7 @@ class SamplingClassifier(nn.Module):
         self.toqueries = nn.Parameter(torch.randn(emb, emb).uniform_(-sqrt(emb), sqrt(emb)))
 
 
-        layers  = [SampleAll(self.graph, compute_weights=True, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys, toqueries=self.toqueries) for _ in range(depth)]
+        layers  = [Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys, toqueries=self.toqueries, max_edges=max_edges, boost=boost) for _ in range(depth)]
         layers += [SimpleRGCN(self.graph, self.r, emb, bases=bases, dropout=dropout) for _ in range(depth)]
 
         self.layers = nn.ModuleList(modules=layers)
@@ -481,22 +481,36 @@ class Sample(nn.Module):
             oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
             dots = (semb * pemb * oemb).sum(dim=1) / sqrt(e)
 
-            # sort by score (this allows us to cut off the low-scoring edges if we sample too many)
-            dots, indices = torch.sort(dots, descending=True)
+            if self.training:
 
-            # sample candidates by score
-            bern = ds.Bernoulli(torch.sigmoid(dots + self.boost))
-            mask = bern.sample().to(torch.bool)  # note that this is detached, no gradient here.
+                # sort by score (this allows us to cut off the low-scoring edges if we sample too many)
+                dots, indices = torch.sort(dots, descending=True)
 
-            # cutt off the low scoring edges
-            if mask.sum() > max_edges:
-                # find the cutoff point
-                cs = mask.cumsum(dim=0) <= max_edges
-                mask = mask * cs
+                # sample candidates by score
+                bern = ds.Bernoulli(torch.sigmoid(dots + self.boost))
+                mask = bern.sample().to(torch.bool)  # note that this is detached, no gradient here.
+                # -- The dots receive a gradient in later layers when they are used for global attention
 
-            # reverse-sort the dots and mask
+                # cutt off the low scoring edges
+                if mask.sum() > max_edges:
 
-            batch.add_edges(candidates, bi, weights=dots)
+                    # find the cutoff point
+                    cs = mask.cumsum(dim=0) <= max_edges
+                    mask = mask * cs
+
+                # reverse-sort the dots and mask
+                dots = dots[indices.sort()[1]]
+                mask = mask[indices.sort()[1]]
+
+                dots = dots[mask]
+                cand_sampled = []
+                for i, c in enumerate(candidates):
+                    if mask[i]:
+                        cand_sampled.append(c)
+            else:
+                cand_sampled = candidates
+
+            batch.add_edges(cand_sampled, bi, weights=dots)
 
         return batch
 
@@ -612,7 +626,7 @@ class SimpleRGCN(nn.Module):
 
         # row normalize
         if self.use_global_weights:
-            values = torch.abs(batch.weights)
+            values = F.softplus(batch.weights)
         else:
             values = torch.ones((indices.size(0), ), device=d(), dtype=torch.float)
 

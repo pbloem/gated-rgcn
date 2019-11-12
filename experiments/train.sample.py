@@ -117,6 +117,8 @@ def go(arg):
             # Evaluate
             if e % 5 == 0:
 
+                model.train(False)
+
                 prt(f'epoch {e},  loss {loss.item():.2}', end='')
                 prt(f',    train cumulative {float(correct / len(train_idx)):.2} ({correct}/{len(train_idx)})', end='')
 
@@ -277,7 +279,7 @@ if __name__ == "__main__":
     parser.add_argument("--boost",
                         dest="boost",
                         help="Num added to the global attention scores, before they go into the sigmoid for sampling. Higher boost causes more incident edges to be sampled and fewer deep ones.",
-                        default=0, type=int)
+                        default=0, type=float)
 
     parser.add_argument("--nm",
                         dest="norm_method",
