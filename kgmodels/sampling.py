@@ -494,7 +494,7 @@ class Sample(nn.Module):
                 mask = bern.sample().to(torch.bool)  # note that this is detached, no gradient here.
                 # -- The dots receive a gradient in later layers when they are used for global attention
 
-                # cutt off the low scoring edges
+                # cut off the low scoring edges
                 if mask.sum() > max_edges:
 
                     # find the cutoff point

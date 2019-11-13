@@ -115,7 +115,7 @@ def go(arg):
                 opt.step()
 
             # Evaluate
-            if e % 5 == 0:
+            if e % arg.eval == 0:
 
                 model.train(False)
 
@@ -280,6 +280,11 @@ if __name__ == "__main__":
                         dest="boost",
                         help="Num added to the global attention scores, before they go into the sigmoid for sampling. Higher boost causes more incident edges to be sampled and fewer deep ones.",
                         default=0, type=float)
+
+    parser.add_argument("--eval",
+                        dest="eval",
+                        help="Number of epochs between evaluations (if no repeats).",
+                        default=5, type=float)
 
     parser.add_argument("--nm",
                         dest="norm_method",
