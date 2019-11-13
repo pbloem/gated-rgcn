@@ -188,12 +188,12 @@ class SamplingClassifier(nn.Module):
 
         self.graph = convert(edges, n)
 
-        self.embeddings = nn.Parameter(torch.FloatTensor(n, emb).uniform_(-sqrt(emb), sqrt(emb)))
+        self.embeddings = nn.Parameter(torch.FloatTensor(n, emb).normal_())
 
         # global attention params
-        self.relations = nn.Parameter(torch.randn(self.r, emb).uniform_(-sqrt(emb), sqrt(emb)))
-        self.tokeys = nn.Parameter(torch.randn(emb, emb).uniform_(-sqrt(emb), sqrt(emb)))
-        self.toqueries = nn.Parameter(torch.randn(emb, emb).uniform_(-sqrt(emb), sqrt(emb)))
+        self.relations = nn.Parameter(torch.randn(self.r, emb).uniform_(-1/sqrt(emb), 1/sqrt(emb)))
+        self.tokeys = nn.Parameter(torch.randn(emb, emb).uniform_(-1/sqrt(emb), 1/sqrt(emb)))
+        self.toqueries = nn.Parameter(torch.randn(emb, emb).uniform_(-1/sqrt(emb), 1/sqrt(emb)))
 
 
         layers  = [Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys, toqueries=self.toqueries, max_edges=max_edges, boost=boost) for _ in range(depth)]
@@ -479,12 +479,15 @@ class Sample(nn.Module):
             # compute the score (bilinear dot product)
             semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
             oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
-            dots = (semb * pemb * oemb).sum(dim=1) / sqrt(e)
+
+            dots = (semb * pemb * oemb).sum(dim=1) / e
 
             if self.training:
 
                 # sort by score (this allows us to cut off the low-scoring edges if we sample too many)
                 dots, indices = torch.sort(dots, descending=True)
+
+                # print(bi, [i.item() for i in dots] )
 
                 # sample candidates by score
                 bern = ds.Bernoulli(torch.sigmoid(dots + self.boost))
@@ -507,6 +510,7 @@ class Sample(nn.Module):
                 for i, c in enumerate(candidates):
                     if mask[i]:
                         cand_sampled.append(c)
+
             else:
                 cand_sampled = candidates
 
@@ -604,11 +608,11 @@ class SimpleRGCN(nn.Module):
         self.r, self.emb = r, emb
 
         if bases is None:
-            self.weights = nn.Parameter(torch.FloatTensor(r, emb, emb).uniform_(-sqrt(emb), sqrt(emb)) )
+            self.weights = nn.Parameter(torch.FloatTensor(r, emb, emb).uniform_(-1/sqrt(emb), 1/sqrt(emb)) )
             self.bases = None
         else:
-            self.comps = nn.Parameter(torch.FloatTensor(r, bases).uniform_(-sqrt(bases), sqrt(bases)) )
-            self.bases = nn.Parameter(torch.FloatTensor(bases, emb, emb).uniform_(-sqrt(emb), sqrt(emb)) )
+            self.comps = nn.Parameter(torch.FloatTensor(r, bases).uniform_(-1/sqrt(bases), 1/sqrt(bases)) )
+            self.bases = nn.Parameter(torch.FloatTensor(bases, emb, emb).uniform_(-1/sqrt(emb), 1/sqrt(emb)) )
 
         self.dropout = None if dropout is None else nn.Dropout(dropout)
 
