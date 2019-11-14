@@ -180,7 +180,7 @@ class Batch():
 
 class SamplingClassifier(nn.Module):
 
-    def __init__(self, edges, n, num_cls, depth=2, emb=16, max_edges=37, boost=0, bases=None, maskid=False, dropout=None):
+    def __init__(self, edges, n, num_cls, depth=2, emb=16, max_edges=37, boost=0, bases=None, maskid=False, dropout=None, forward_mp=False):
         super().__init__()
 
         self.r, self.n, self.max_edges = len(edges.keys()), n, max_edges
@@ -195,8 +195,14 @@ class SamplingClassifier(nn.Module):
         self.tokeys = nn.Parameter(torch.randn(emb, emb).uniform_(-1/sqrt(emb), 1/sqrt(emb)))
         self.toqueries = nn.Parameter(torch.randn(emb, emb).uniform_(-1/sqrt(emb), 1/sqrt(emb)))
 
+        layers = []
 
-        layers  = [Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys, toqueries=self.toqueries, max_edges=max_edges, boost=boost) for _ in range(depth)]
+        for d in range(depth):
+            if forward_mp and d != 0:
+                layers.append(SimpleRGCN(self.graph, self.r, emb, bases=bases, dropout=dropout))
+
+            layers.append(Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys, toqueries=self.toqueries, max_edges=max_edges, boost=boost))
+
         layers += [SimpleRGCN(self.graph, self.r, emb, bases=bases, dropout=dropout) for _ in range(depth)]
 
         self.layers = nn.ModuleList(modules=layers)
