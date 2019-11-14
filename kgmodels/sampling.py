@@ -466,6 +466,9 @@ class Sample(nn.Module):
             # we can sample this many edges (the total maximum minus the number that have already been sampled)
             max_edges = self.max_edges - len(batch.edgesets[bi])
 
+            if max_edges <= 0:
+                continue
+
             candidates = batch.inc_edges(bi)
             embeddings = torch.cat([batch.embeddings(), self.nodes], dim=0) # probably expensive
 
