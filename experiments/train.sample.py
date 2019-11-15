@@ -99,7 +99,7 @@ def go(arg):
             model.train(True)
 
             correct = 0
-            for fr in trange(0, len(train_idx), arg.batch):
+            for fr in range(0, len(train_idx), arg.batch):
                 to = min(len(train_idx), fr + arg.batch)
 
                 inputs = train_idx[fr:to] # list, not a tensor
