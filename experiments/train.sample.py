@@ -83,7 +83,8 @@ def go(arg):
         train_idx, test_idx = [n.item() for n in train_idx], [n.item() for n in test_idx]
 
         model = kgmodels.SamplingClassifier(edges=edges, n=N, depth=arg.depth, emb=arg.emb, max_edges=arg.max_edges,
-                num_cls=num_cls, boost=arg.boost, bases=arg.bases, maskid=arg.maskid, dropout=arg.do, forward_mp=arg.forward_mp)
+                num_cls=num_cls, boost=arg.boost, bases=arg.bases, maskid=arg.maskid, dropout=arg.do, forward_mp=arg.forward_mp,
+                csample=arg.csample)
 
         if torch.cuda.is_available():
             prt('Using CUDA.')
@@ -98,7 +99,7 @@ def go(arg):
             model.train(True)
 
             correct = 0
-            for fr in range(0, len(train_idx), arg.batch):
+            for fr in trange(0, len(train_idx), arg.batch):
                 to = min(len(train_idx), fr + arg.batch)
 
                 inputs = train_idx[fr:to] # list, not a tensor
@@ -117,14 +118,13 @@ def go(arg):
             # Evaluate
             if e % arg.eval == 0:
 
-                model.train(False)
-
                 prt(f'epoch {e},  loss {loss.item():.2}', end='')
                 prt(f',    train cumulative {float(correct / len(train_idx)):.2} ({correct}/{len(train_idx)})', end='')
 
                 with torch.no_grad():
 
-                    model.train(False)
+                    if arg.full_eval:
+                        model.train(False)
 
                     correct = 0
                     for fr in range(0, len(train_idx), arg.batch*2):
@@ -312,6 +312,14 @@ if __name__ == "__main__":
                         help="Perform message passing between sampling steps.",
                         action="store_true")
 
+    parser.add_argument("--csample",
+                        dest="csample",
+                        help="Sub-sample the candidate edges .",
+                        default=None, type=int)
+
+    parser.add_argument("--full-eval", dest="full_eval",
+                        help="Do a full graph sample for evaluation (may be very memory-intensive).",
+                        action="store_true")
 
     options = parser.parse_args()
 

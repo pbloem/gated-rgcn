@@ -8,10 +8,10 @@ import torch.nn.functional as F
 
 from math import sqrt
 
-import sys
+import sys, random
 
 import util
-from util import d
+from util import d, tic, toc
 
 """
 TODO:
@@ -180,7 +180,7 @@ class Batch():
 
 class SamplingClassifier(nn.Module):
 
-    def __init__(self, edges, n, num_cls, depth=2, emb=16, max_edges=37, boost=0, bases=None, maskid=False, dropout=None, forward_mp=False):
+    def __init__(self, edges, n, num_cls, depth=2, emb=16, max_edges=37, boost=0, bases=None, maskid=False, dropout=None, forward_mp=False, csample=None):
         super().__init__()
 
         self.r, self.n, self.max_edges = len(edges.keys()), n, max_edges
@@ -201,7 +201,7 @@ class SamplingClassifier(nn.Module):
             if forward_mp and d != 0:
                 layers.append(SimpleRGCN(self.graph, self.r, emb, bases=bases, dropout=dropout))
 
-            layers.append(Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys, toqueries=self.toqueries, max_edges=max_edges, boost=boost))
+            layers.append(Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys, toqueries=self.toqueries, max_edges=max_edges, boost=boost, csample=csample))
 
         layers += [SimpleRGCN(self.graph, self.r, emb, bases=bases, dropout=dropout) for _ in range(depth)]
 
@@ -449,7 +449,7 @@ class Sample(nn.Module):
     Extends a subgraph batch by computing global self attention scores and sampling accoridng to their magnitude
     """
 
-    def __init__(self, graph, nodes=None, relations=None, tokeys=None, toqueries=None, max_edges=200, boost=0.0):
+    def __init__(self, graph, nodes=None, relations=None, tokeys=None, toqueries=None, max_edges=200, boost=0.0, csample=None):
         super().__init__()
 
         self.graph = graph
@@ -462,68 +462,74 @@ class Sample(nn.Module):
         self.max_edges = max_edges
         self.boost = boost
 
+        self.csample = csample
+
     def forward(self, batch : Batch):
 
         b = batch.size()
         n, e = batch.embeddings().size()
 
-        for bi in range(b):
+        with torch.no_grad():
 
-            # we can sample this many edges (the total maximum minus the number that have already been sampled)
-            max_edges = self.max_edges - len(batch.edgesets[bi])
+            for bi in range(b):
 
-            if max_edges <= 0:
-                continue
+                # we can sample this many edges (the total maximum minus the number that have already been sampled)
+                max_edges = self.max_edges - len(batch.edgesets[bi])
 
-            candidates = batch.inc_edges(bi)
-            embeddings = torch.cat([batch.embeddings(), self.nodes], dim=0) # probably expensive
+                if max_edges <= 0:
+                    continue
 
-            cflat = list(candidates)
+                candidates = list(batch.inc_edges(bi))
+                cflat = list(candidates)
 
-            si, pi, oi = [s for s, _, _ in cflat], [p for _, p, _ in cflat], [o for _, _, o in cflat]
-            si, oi = batch.batch_indices(si), batch.batch_indices(oi)
+                if self.training:
+                    if self.csample is not None and len(cflat) > self.csample:
+                        cflat = random.sample(cflat, self.csample)
 
-            semb, pemb, oemb, = embeddings[si, :], self.relations[pi, :], embeddings[oi, :]
+                embeddings = torch.cat([batch.embeddings(), self.nodes], dim=0)  # probably expensive
 
-            # compute the score (bilinear dot product)
-            semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
-            oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
+                si, pi, oi = [s for s, _, _ in cflat], [p for _, p, _ in cflat], [o for _, _, o in cflat]
+                si, oi = batch.batch_indices(si), batch.batch_indices(oi)
 
-            dots = (semb * pemb * oemb).sum(dim=1) / e
+                semb, pemb, oemb, = embeddings[si, :], self.relations[pi, :], embeddings[oi, :]
 
-            if self.training:
+                # compute the score (bilinear dot product)
+                semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
+                oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
 
-                # sort by score (this allows us to cut off the low-scoring edges if we sample too many)
-                dots, indices = torch.sort(dots, descending=True)
+                dots = (semb * pemb * oemb).sum(dim=1) / e
 
-                # print(bi, [i.item() for i in dots] )
+                if self.training:
 
-                # sample candidates by score
-                bern = ds.Bernoulli(torch.sigmoid(dots + self.boost))
-                mask = bern.sample().to(torch.bool)  # note that this is detached, no gradient here.
-                # -- The dots receive a gradient in later layers when they are used for global attention
+                    # sort by score (this allows us to cut off the low-scoring edges if we sample too many)
+                    dots, indices = torch.sort(dots, descending=True)
 
-                # cut off the low scoring edges
-                if mask.sum() > max_edges:
+                    # sample candidates by score
+                    bern = ds.Bernoulli(torch.sigmoid(dots + self.boost))
+                    mask = bern.sample().to(torch.bool)  # note that this is detached, no gradient here.
+                    # -- The dots receive a gradient in later layers when they are used for global attention
 
-                    # find the cutoff point
-                    cs = mask.cumsum(dim=0) <= max_edges
-                    mask = mask * cs
+                    # cut off the low scoring edges
+                    if mask.sum() > max_edges:
 
-                # reverse-sort the dots and mask
-                dots = dots[indices.sort()[1]]
-                mask = mask[indices.sort()[1]]
+                        # find the cutoff point
+                        cs = mask.cumsum(dim=0) <= max_edges
+                        mask = mask * cs
 
-                dots = dots[mask]
-                cand_sampled = []
-                for i, c in enumerate(candidates):
-                    if mask[i]:
-                        cand_sampled.append(c)
+                    # reverse-sort the mask
+                    mask = mask[indices.sort()[1]]
 
-            else:
-                cand_sampled = candidates
+                    cand_sampled = []
+                    for i, c in enumerate(cflat):
+                        if mask[i]:
+                            cand_sampled.append(c)
 
-            batch.add_edges(cand_sampled, bi, weights=dots)
+                else:
+                    cand_sampled = cflat
+
+                batch.add_edges(cand_sampled, bi)
+
+        # print(f'\ntotal {toc():.4}s     {len(candidates)}     {len(cand_sampled)}')
 
         return batch
 
@@ -540,8 +546,6 @@ class SampleGA(nn.Module):
         self.graph = graph
 
     def forward(self, batch_nodes, batch_edges, embeddings, global_attention=None):
-
-        # TODO pass on GA vectors
 
         with torch.no_grad():
             # - extend the subgraph by sampling. No gradient for this part
@@ -611,7 +615,7 @@ class SimpleRGCN(nn.Module):
     Basic RGCN on subgraphs. Ignores global attention, and performs simple message passing
     """
 
-    def __init__(self, graph, r, emb, bases=None, dropout=None, use_global_weights=False):
+    def __init__(self, graph, r, emb, bases=None, dropout=None, use_global_weights=False, tokeys=None, toqueries=None, relations=None):
         super().__init__()
 
         self.r, self.emb = r, emb
@@ -626,6 +630,10 @@ class SimpleRGCN(nn.Module):
         self.dropout = None if dropout is None else nn.Dropout(dropout)
 
         self.use_global_weights = use_global_weights
+        self.tokeys = tokeys
+        self.toqueries = toqueries
+        self.relations = relations
+
 
     def forward(self, batch):
 
@@ -639,7 +647,22 @@ class SimpleRGCN(nn.Module):
 
         # row normalize
         if self.use_global_weights:
-            values = F.softplus(batch.weights)
+
+            # recompute the global weights
+            # -- these ones get gradients, so it's more efficient to recompute the small subset that
+            #    requires gradients.
+            si, pi, oi = [s for s, _, _ in cflat], [p for _, p, _ in cflat], [o for _, _, o in cflat]
+            si, oi = batch.batch_indices(si), batch.batch_indices(oi)
+
+            semb, pemb, oemb, = batch.embeddings[si, :], self.relations[pi, :], batch.embeddings[oi, :]
+
+            # compute the score (bilinear dot product)
+            semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
+            oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
+
+            dots = (semb * pemb * oemb).sum(dim=1) / e
+
+            values = F.softplus(dots)
         else:
             values = torch.ones((indices.size(0), ), device=d(), dtype=torch.float)
 
