@@ -10,6 +10,8 @@ from math import sqrt
 
 import sys, random
 
+import heapq
+
 import util
 from util import d, tic, toc
 
@@ -28,6 +30,29 @@ TODO:
 - Run on GPU
 
 """
+
+def heapselect(generator, keyfunc, k):
+    """
+    Selects the k smallest elements from the generator
+
+    :param generator:
+    :param key:
+    :return:
+    """
+
+    heap = []
+    heapq.heapify(heap)
+
+    for value in generator:
+        key = - keyfunc(value)
+        # -- we flip the order so that the _largest_ element gest ejected if the heap is too big.
+
+        if len(heap) < k:
+            heapq.heappush(heap, (key, value))
+        else:
+            heapq.heappushpop(heap, (key, value))
+
+    return [pair[1] for pair in heap]
 
 def pad(elems, max, padelem=0, copy=False):
     ln = len(elems)
@@ -105,6 +130,20 @@ class Batch():
         :return:
         """
         return len(self.edgesets)
+
+    def gen_inc_edges(self, bi):
+        """
+        Generates all new incident edges
+
+        :param bi:
+        :param globals:
+        :return:
+        """
+
+        for node in self.nodesets[bi]:
+            for edge in self.graph[node]:
+                if edge not in self.edgesets[bi]:
+                    yield edge
 
     def inc_edges(self, bi, prune=True):
 
@@ -355,13 +394,16 @@ class Sample(nn.Module):
                 if max_edges <= 0:
                     continue
 
-                candidates = batch.inc_edges(bi)
-                cflat = list(candidates)
+                # candidates = batch.inc_edges(bi)
+                # cflat = list(candidates)
 
-                if self.training: # pre-select by cached global scores
-                    if self.csample is not None and len(cflat) > self.csample:
-                        cflat.sort(key=lambda edge : - globals[edge])
-                        cflat = cflat[:self.csample]
+                if self.training and self.csample is not None:
+                    # cflat.sort(key=lambda edge : - globals[edge])
+                    # cflat = cflat[:self.csample]
+
+                    cflat = heapselect(generator=batch.gen_inc_edges(bi), keyfunc=lambda edge : - globals[edge], k=self.csample)
+                else:
+                    cflat = list(batch.gen_inc_edges(bi))
 
                 embeddings = torch.cat([batch.embeddings(), self.nodes], dim=0)  # probably expensive
 
