@@ -55,6 +55,22 @@ def convert(edges, num_nodes):
 
     return res
 
+def convert_el(edges):
+    """
+    Convert from a relation dictionary to single edgelist representation.
+    :param edges:
+    :param n:
+    :return: A dictionary mapping nodes to outgoing triples.
+    """
+
+    res = []
+
+    for rel, (froms, tos) in edges.items():
+        for fr, to in zip(froms, tos):
+            res.append((fr, rel, to))
+
+    return res
+
 class Batch():
     """
     Maintains all relevant information about a batch of subgraphs.
@@ -180,13 +196,14 @@ class Batch():
 
 class SamplingClassifier(nn.Module):
 
-    def __init__(self, edges, n, num_cls, depth=2, emb=16, max_edges=37, boost=0, bases=None, maskid=False, dropout=None, forward_mp=False, csample=None):
+    def __init__(self, graph, n, num_cls, depth=2, emb=16, max_edges=37, boost=0, bases=None, maskid=False, dropout=None, forward_mp=False, csample=None):
         super().__init__()
 
-        self.r, self.n, self.max_edges = len(edges.keys()), n, max_edges
+        self.r, self.n, self.max_edges = len(graph.keys()), n, max_edges
         self.maskid = maskid
 
-        self.graph = convert(edges, n)
+        self.graph = convert(graph, n)
+        self.edges = convert_el(graph)
 
         self.embeddings = nn.Parameter(torch.FloatTensor(n, emb).normal_())
 
@@ -207,194 +224,47 @@ class SamplingClassifier(nn.Module):
 
         self.layers = nn.ModuleList(modules=layers)
 
-
         self.cls = nn.Linear(emb, num_cls)
 
-    def forward(self, batch_nodes : List[int]):
-
-        b = len(batch_nodes)
-
-        # TODO maskid
-
-        batch = Batch(batch_nodes, self.graph, self.embeddings, maskid=self.maskid)
-
-        for i, layer in enumerate(self.layers):
-            batch = layer(batch)
-
-        pooled = batch.embeddings()[:b, :]
-        c = self.cls(pooled) # (b, num_cls)
-
-        return c
-
-class SamplingRGCN(nn.Module):
-    """
-    Combines RGCN with a global self-attention. At each layer, the self attention is computed,
-    and a samples subgraph is extended by sampling extra edges based on global attention weights. Then, message passing
-    (weighted by the re-normalized attention weights) is performed to update the node embeddings.
-
-    At the end, a pooling operation over all nodes in the sampled subgraph determines the class.
-    """
-
-    def __init__(self, graph, r, emb, max, norm_method='softplus', boost=0, bases=None, sample=True, convolve=True):
-        super().__init__()
-
-        self.max = max
-        self.graph = graph # edgelist representation
-        self.r = r
-        self.boost = boost
-
-        self.sample, self.convolve = sample, convolve
-
-        self.relations = nn.Parameter(torch.randn(r, emb).uniform_(-sqrt(emb), sqrt(emb)))
-
-        self.tokeys    = nn.Parameter(torch.randn(emb, emb).uniform_(-sqrt(emb), sqrt(emb)))
-        self.toqueries = nn.Parameter(torch.randn(emb, emb).uniform_(-sqrt(emb), sqrt(emb)))
-        # self.tovalues  = nn.Parameter(torch.randn(emb, emb).uniform_(-sqrt(emb), sqrt(emb)))
-
-        if bases is None:
-            self.weights = nn.Parameter(torch.FloatTensor(r, emb, emb).uniform_(-sqrt(emb), sqrt(emb)) )
-            self.bases = None
-        else:
-            self.comps = nn.Parameter(torch.FloatTensor(r, bases).uniform_(-sqrt(bases), sqrt(bases)) )
-            self.bases = nn.Parameter(torch.FloatTensor(bases, emb, emb).uniform_(-sqrt(emb), sqrt(emb)) )
-
-        self.norm_method = norm_method
-
-    def forward(self, batch_nodes, batch_edges, embeddings):
+    def precompute_globals(self):
         """
-        :param batch_nodes:
-        :param batch_edges:
-        :param max:
-        :param embeddings: Node embeddings from the previous layer. These are updated through message passing for the
-        selected nodes, and taken from the embedding layer for the rest
+        Computes global weight for each edge based on the current embeddings. These are periodically updated (i.e.
+        once per epoch). These weights are gradient free, and for the batch (after sampling) the current embeddings
+        are used to compute the real global weights.
+
         :return:
         """
 
-        if self.sample:
-            with torch.no_grad():
-                # - extend the subgraph by sampling. No gradient for this part
+        with torch.no_grad():
 
-                b, n, e = embeddings.size()
-                assert b == len(batch_nodes) == len(batch_edges)
+            n, e = self.embeddings.size()
 
-                candidates = []
-                for i, (nodes, edges)  in enumerate(zip(batch_nodes, batch_edges)):
-                    # collect all incident edges
-                    inc_edges = set()
+            si, pi, oi = [s for s, _, _ in self.edges], [p for _, p, _ in self.edges], [o for _, _, o in self.edges]
 
-                    for node in nodes:
-                        inc_edges.update(self.graph[node])
-
-                    # remove already sampled edges
-                    inc_edges.difference_update(edges)
-                    candidates.append(inc_edges)
-
-                # compute raw scores for all candidate edges
-
-                # -- flatten out the candidates
-                batch_idx = []
-                candidates_flat = []
-                for b, c in enumerate(candidates):
-                    batch_idx.extend([b] * len(c))
-                    candidates_flat.extend(c)
-
-                cflat = torch.tensor(candidates_flat, device=d())
-                bflat = torch.tensor(batch_idx, device=d())
-
-                # -- select the relevant node and relation embeddings
-                si, pi, oi = cflat[:, 0], cflat[:, 1], cflat[:, 2]
-                semb, pemb, oemb= embeddings[bflat, si, :], self.relations[pi, :], embeddings[bflat, oi, :]
-
-                # -- compute the score (bilinear dot product)
-                semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
-                oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
-                dots = (semb * pemb * oemb).sum(dim=1) / sqrt(e)
-
-                # -- sort by score (this allows us to cut off the low-scoring edges if we sample too many)
-                dots, indices = torch.sort(dots, descending=True)
-                cflat = cflat[indices, :]
-                bflat = bflat[indices]
-
-                # sample candidates by score
-                bern = ds.Bernoulli(torch.sigmoid(dots + self.boost))
-                samples = bern.sample().to(torch.bool) # note that this is detached, no gradient here.
-
-                cflat = cflat[samples, :]
-                bflat = bflat[samples]
-
-                # add the candidates to the batch
-                for i in range(cflat.size(0)):
-                    b = bflat[i].item()
-                    s, p, o = [c.item() for c in cflat[i, :]]
-
-                    if len(batch_edges[b]) < self.max:
-
-                        batch_nodes[b].add(s)
-                        batch_nodes[b].add(o)
-                        batch_edges[b].add((s, p, o))
-
-        # convert to batch of sparse graphs
-        # - We pad the value and index vectors to be the same length.
-        # - We recompute the dot products with the padding.
-        # - We add scores as values. The message passing is mediated by these, to a gradient flows back through
-        #   the global attention
-
-        if self.convolve:
-            b, n, e = embeddings.size()
-            r = self.r
-
-            batch_idx = []
-            cflat = []
-
-            for bi, edges in enumerate(batch_edges):
-                batch_idx.extend([bi] * len(edges))
-                cflat.extend(edges)
-
-            cflat = torch.tensor(cflat, device=d())
-            bflat = torch.tensor(batch_idx, device=d())
-
-            si, pi, oi = cflat[:, 0], cflat[:, 1], cflat[:, 2]
-
-            semb, pemb, oemb = embeddings[bflat, si, :], self.relations[pi, :], embeddings[bflat, oi, :]
+            semb, pemb, oemb, = self.embeddings[si, :], self.relations[pi, :], self.embeddings[oi, :]
 
             # -- compute the score (bilinear dot product)
             semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
             oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
             dots = (semb * pemb * oemb).sum(dim=1) / sqrt(e)
 
-            # convert to sparse matrices
-            fr = cflat[:, 0] + n * cflat[:, 1] + (n * r) * bflat
-            to = cflat[:, 2] + n * bflat
-            indices = torch.cat([fr[:, None], to[:, None]], dim=1)
+            self.globals = {}
+            for i, edge in enumerate(self.edges):
+                self.globals[edge] = dots[i].item()
 
-            # row normalize
-            dots = dots * 0.0 # test eq. to RGCN   !!!!!
-            dots = util.simple_normalize(indices, dots, (b*r*n, b*n), method=self.norm_method)
+    def forward(self, batch_nodes : List[int]):
 
-            # perform weighted message passing
-            output = util.spmm(indices, dots, (b*n*r, b*n), embeddings.reshape(-1, e))
-            assert output.size() == (b*n*r, e), f'{output.size()} {(b*n*r, e)}'
+        b = len(batch_nodes)
 
-            output = output.view(b, r, n, e)
+        batch = Batch(batch_nodes, self.graph, self.embeddings, maskid=self.maskid)
 
-            if self.bases is not None:
-                weights = torch.einsum('rb, bij -> rij', self.comps, self.bases)
-            else:
-                weights = self.weights
+        for i, layer in enumerate(self.layers):
+            batch = layer(batch, self.globals)
 
-            # Apply weights
-            output = torch.einsum('rij, brnj -> bnri', weights, output)
+        pooled = batch.embeddings()[:b, :]
+        c = self.cls(pooled) # (b, num_cls)
 
-            # add original embeddings, so the unused nodes don't get zeroed out
-            output = torch.cat([output, embeddings[:, :, None, :]], dim=2)
-
-            # unify the relations
-            output = output.sum(dim=2)
-            output = F.relu(output)
-        else:
-            output = embeddings
-
-        return batch_nodes, batch_edges, output
+        return c
 
 class SampleAll(nn.Module):
     """
@@ -464,7 +334,13 @@ class Sample(nn.Module):
 
         self.csample = csample
 
-    def forward(self, batch : Batch):
+    def forward(self, batch : Batch, globals):
+        """
+
+        :param batch:
+        :param globals: Estimate of the global attention
+        :return:
+        """
 
         b = batch.size()
         n, e = batch.embeddings().size()
@@ -479,12 +355,13 @@ class Sample(nn.Module):
                 if max_edges <= 0:
                     continue
 
-                candidates = list(batch.inc_edges(bi))
+                candidates = batch.inc_edges(bi)
                 cflat = list(candidates)
 
-                if self.training:
+                if self.training: # pre-select by cached global scores
                     if self.csample is not None and len(cflat) > self.csample:
-                        cflat = random.sample(cflat, self.csample)
+                        cflat.sort(key=lambda edge : - globals[edge])
+                        cflat = cflat[:self.csample]
 
                 embeddings = torch.cat([batch.embeddings(), self.nodes], dim=0)  # probably expensive
 
@@ -533,83 +410,6 @@ class Sample(nn.Module):
 
         return batch
 
-class SampleGA(nn.Module):
-    """
-    Extends a subgraph batch by computing self-attention weights on all incident edges.
-
-    Computed weights are stored for use in the second phase.
-    """
-
-    def __init__(self, graph):
-        super().__init__()
-
-        self.graph = graph
-
-    def forward(self, batch_nodes, batch_edges, embeddings, global_attention=None):
-
-        with torch.no_grad():
-            # - extend the subgraph by sampling. No gradient for this part
-
-            b, n, e = embeddings.size()
-            assert b == len(batch_nodes) == len(batch_edges)
-
-            candidates = []
-            for i, (nodes, edges) in enumerate(zip(batch_nodes, batch_edges)):
-                # collect all incident edges
-                inc_edges = set()
-
-                for node in nodes:
-                    inc_edges.update(self.graph[node])
-
-                # remove already sampled edges
-                inc_edges.difference_update(edges)
-                candidates.append(inc_edges)
-
-            # compute raw scores for all candidate edges
-
-            # -- flatten out the candidates
-            batch_idx = []
-            candidates_flat = []
-            for b, c in enumerate(candidates):
-                batch_idx.extend([b] * len(c))
-                candidates_flat.extend(c)
-
-            cflat = torch.tensor(candidates_flat, device=d())
-            bflat = torch.tensor(batch_idx, device=d())
-
-            # -- select the relevant node and relation embeddings
-            si, pi, oi = cflat[:, 0], cflat[:, 1], cflat[:, 2]
-            semb, pemb, oemb = embeddings[bflat, si, :], self.relations[pi, :], embeddings[bflat, oi, :]
-
-            # -- compute the score (bilinear dot product)
-            semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
-            oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
-            dots = (semb * pemb * oemb).sum(dim=1) / sqrt(e)
-
-            # -- sort by score (this allows us to cut off the low-scoring edges if we sample too many)
-            dots, indices = torch.sort(dots, descending=True)
-            cflat = cflat[indices, :]
-            bflat = bflat[indices]
-
-            # sample candidates by score
-            bern = ds.Bernoulli(torch.sigmoid(dots + self.boost))
-            samples = bern.sample().to(torch.bool)  # note that this is detached, no gradient here.
-
-            cflat = cflat[samples, :]
-            bflat = bflat[samples]
-
-            # add the candidates to the batch
-            for i in range(cflat.size(0)):
-                b = bflat[i].item()
-                s, p, o = [c.item() for c in cflat[i, :]]
-
-                if len(batch_edges[b]) < self.max:
-                    batch_nodes[b].add(s)
-                    batch_nodes[b].add(o)
-                    batch_edges[b].add((s, p, o))
-
-        return batch_nodes, batch_edges, embeddings
-
 class SimpleRGCN(nn.Module):
     """
     Basic RGCN on subgraphs. Ignores global attention, and performs simple message passing
@@ -635,7 +435,7 @@ class SimpleRGCN(nn.Module):
         self.relations = relations
 
 
-    def forward(self, batch):
+    def forward(self, batch, globals):
 
         n, r, e = batch.num_nodes(), self.r, self.emb
         cflat = batch.cflat()

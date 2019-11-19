@@ -82,7 +82,7 @@ def go(arg):
 
         train_idx, test_idx = [n.item() for n in train_idx], [n.item() for n in test_idx]
 
-        model = kgmodels.SamplingClassifier(edges=edges, n=N, depth=arg.depth, emb=arg.emb, max_edges=arg.max_edges,
+        model = kgmodels.SamplingClassifier(graph=edges, n=N, depth=arg.depth, emb=arg.emb, max_edges=arg.max_edges,
                 num_cls=num_cls, boost=arg.boost, bases=arg.bases, maskid=arg.maskid, dropout=arg.do, forward_mp=arg.forward_mp,
                 csample=arg.csample)
 
@@ -97,6 +97,8 @@ def go(arg):
         for e in range(arg.epochs):
 
             model.train(True)
+
+            model.precompute_globals()
 
             correct = 0
             for fr in range(0, len(train_idx), arg.batch):
