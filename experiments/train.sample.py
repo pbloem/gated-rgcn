@@ -84,7 +84,7 @@ def go(arg):
 
         model = kgmodels.SamplingClassifier(graph=edges, n=N, depth=arg.depth, emb=arg.emb, max_edges=arg.max_edges,
                 num_cls=num_cls, boost=arg.boost, bases=arg.bases, maskid=arg.maskid, dropout=arg.do, forward_mp=arg.forward_mp,
-                csample=arg.csample)
+                csample=arg.csample, incdo=arg.incdo)
 
         if torch.cuda.is_available():
             prt('Using CUDA.')
@@ -101,7 +101,7 @@ def go(arg):
             model.precompute_globals()
 
             correct = 0
-            for fr in range(0, len(train_idx), arg.batch):
+            for fr in trange(0, len(train_idx), arg.batch):
                 to = min(len(train_idx), fr + arg.batch)
 
                 inputs = train_idx[fr:to] # list, not a tensor
@@ -286,7 +286,12 @@ if __name__ == "__main__":
     parser.add_argument("--eval",
                         dest="eval",
                         help="Number of epochs between evaluations (if no repeats).",
-                        default=5, type=float)
+                        default=5, type=int)
+
+    parser.add_argument("--incdo",
+                        dest="incdo",
+                        help="Dropout probability on the incident edges. Higher dropouts miss more edges, but speed up processing",
+                        default=None, type=float)
 
     parser.add_argument("--nm",
                         dest="norm_method",

@@ -131,7 +131,7 @@ class Batch():
         """
         return len(self.edgesets)
 
-    def gen_inc_edges(self, bi):
+    def gen_inc_edges(self, bi, do=None):
         """
         Generates all new incident edges
 
@@ -143,7 +143,8 @@ class Batch():
         for node in self.nodesets[bi]:
             for edge in self.graph[node]:
                 if edge not in self.edgesets[bi]:
-                    yield edge
+                    if do is None or random.random() < do:
+                        yield edge
 
     def inc_edges(self, bi, prune=True):
 
@@ -235,7 +236,7 @@ class Batch():
 
 class SamplingClassifier(nn.Module):
 
-    def __init__(self, graph, n, num_cls, depth=2, emb=16, max_edges=37, boost=0, bases=None, maskid=False, dropout=None, forward_mp=False, csample=None):
+    def __init__(self, graph, n, num_cls, depth=2, emb=16, max_edges=37, boost=0, bases=None, maskid=False, dropout=None, forward_mp=False, csample=None, **kwargs):
         super().__init__()
 
         self.r, self.n, self.max_edges = len(graph.keys()), n, max_edges
@@ -255,9 +256,9 @@ class SamplingClassifier(nn.Module):
 
         for d in range(depth):
             if forward_mp and d != 0:
-                layers.append(SimpleRGCN(self.graph, self.r, emb, bases=bases, dropout=dropout))
+                layers.append(SimpleRGCN(self.graph, self.r, emb, bases=bases, dropout=dropout, **kwargs))
 
-            layers.append(Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys, toqueries=self.toqueries, max_edges=max_edges, boost=boost, csample=csample))
+            layers.append(Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys, toqueries=self.toqueries, max_edges=max_edges, boost=boost, csample=csample, **kwargs))
 
         layers += [SimpleRGCN(self.graph, self.r, emb, bases=bases, dropout=dropout) for _ in range(depth)]
 
@@ -358,7 +359,7 @@ class Sample(nn.Module):
     Extends a subgraph batch by computing global self attention scores and sampling accoridng to their magnitude
     """
 
-    def __init__(self, graph, nodes=None, relations=None, tokeys=None, toqueries=None, max_edges=200, boost=0.0, csample=None):
+    def __init__(self, graph, nodes=None, relations=None, tokeys=None, toqueries=None, max_edges=200, boost=0.0, csample=None, incdo=None, **kwargs):
         super().__init__()
 
         self.graph = graph
@@ -372,6 +373,7 @@ class Sample(nn.Module):
         self.boost = boost
 
         self.csample = csample
+        self.incdo = incdo
 
     def forward(self, batch : Batch, globals):
         """
@@ -397,11 +399,12 @@ class Sample(nn.Module):
                 # candidates = batch.inc_edges(bi)
                 # cflat = list(candidates)
 
+                tic()
                 if self.training and self.csample is not None:
                     # cflat.sort(key=lambda edge : - globals[edge])
                     # cflat = cflat[:self.csample]
 
-                    cflat = heapselect(generator=batch.gen_inc_edges(bi), keyfunc=lambda edge : - globals[edge], k=self.csample)
+                    cflat = heapselect(generator=batch.gen_inc_edges(bi, do=self.incdo), keyfunc=lambda edge : - globals[edge], k=self.csample)
                 else:
                     cflat = list(batch.gen_inc_edges(bi))
 
@@ -448,8 +451,6 @@ class Sample(nn.Module):
 
                 batch.add_edges(cand_sampled, bi)
 
-        # print(f'\ntotal {toc():.4}s     {len(candidates)}     {len(cand_sampled)}')
-
         return batch
 
 class SimpleRGCN(nn.Module):
@@ -457,7 +458,7 @@ class SimpleRGCN(nn.Module):
     Basic RGCN on subgraphs. Ignores global attention, and performs simple message passing
     """
 
-    def __init__(self, graph, r, emb, bases=None, dropout=None, use_global_weights=False, tokeys=None, toqueries=None, relations=None):
+    def __init__(self, graph, r, emb, bases=None, dropout=None, use_global_weights=False, tokeys=None, toqueries=None, relations=None, **kwargs):
         super().__init__()
 
         self.r, self.emb = r, emb
