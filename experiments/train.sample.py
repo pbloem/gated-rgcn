@@ -308,7 +308,7 @@ if __name__ == "__main__":
                         action="store_true")
 
     parser.add_argument("--dropin", dest="dropin",
-                        help="Randomly mask out connections by atte tion weight.",
+                        help="Randomly mask out connections by attention weight.",
                         action="store_true")
 
     parser.add_argument("--mask-id", dest="maskid",
