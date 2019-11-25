@@ -266,6 +266,16 @@ class SamplingClassifier(nn.Module):
 
         self.cls = nn.Linear(emb, num_cls)
 
+    def set(self, parm, value):
+
+        if parm == 'incdo':
+
+            for layer in self.layers:
+                if type(layer) == Sample:
+                    layer.incdo = value
+
+        else:
+            raise Exception(f'parameter {parm} not recognized.')
     def precompute_globals(self):
         """
         Computes global weight for each edge based on the current embeddings. These are periodically updated (i.e.
@@ -405,6 +415,7 @@ class Sample(nn.Module):
                     # cflat = cflat[:self.csample]
 
                     cflat = heapselect(generator=batch.gen_inc_edges(bi, do=self.incdo), keyfunc=lambda edge : - globals[edge], k=self.csample)
+
                 else:
                     cflat = list(batch.gen_inc_edges(bi))
 

@@ -96,6 +96,12 @@ def go(arg):
 
         for e in range(arg.epochs):
 
+            if arg.inc_anneal is not None:
+                if arg.inc_anneal == 'linear':
+                    model.set('incdo', arg.incdo * (1.0 - (e/arg.epochs)))
+                else:
+                    raise Exception(f'{arg.inc_anneal}')
+
             model.train(True)
 
             model.precompute_globals()
@@ -292,6 +298,11 @@ if __name__ == "__main__":
                         dest="incdo",
                         help="Dropout probability on the incident edges. Higher dropouts miss more edges, but speed up processing",
                         default=None, type=float)
+
+    parser.add_argument("--inc-anneal",
+                        dest="inc_anneal",
+                        help="Annealing schedule for the incdo parameter (linear)",
+                        default=None, type=str)
 
     parser.add_argument("--nm",
                         dest="norm_method",
