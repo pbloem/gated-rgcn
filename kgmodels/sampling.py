@@ -457,6 +457,8 @@ class Sample(nn.Module):
                         if mask[i]:
                             cand_sampled.append(c)
 
+                    if len(cand_sampled) > 0: # to avoid errors downstream. Hopefully, this doesn't happen too often
+                        cand_sampled.extend(cflat[:20])
                 else:
                     cand_sampled = cflat
 
