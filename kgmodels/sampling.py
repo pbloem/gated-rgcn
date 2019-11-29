@@ -143,7 +143,7 @@ class Batch():
         for node in self.nodesets[bi]:
             for edge in self.graph[node]:
                 if edge not in self.edgesets[bi]:
-                    if do is None or random.random() < do:
+                    if do is None or random.random() > do:
                         yield edge
 
     def inc_edges(self, bi, prune=True):
