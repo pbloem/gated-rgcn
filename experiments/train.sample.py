@@ -8,6 +8,8 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 from torch.autograd import Variable
+from torch.utils.tensorboard import SummaryWriter
+
 
 import rdflib as rdf
 import pandas as pd
@@ -30,8 +32,11 @@ def prt(str, end='\n'):
         print(str, end=end)
 
 def go(arg):
+
     global repeats
     repeats = arg.repeats
+
+    tbw = SummaryWriter(log_dir=arg.tb_dir)
 
     dev = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -94,6 +99,8 @@ def go(arg):
 
         opt = torch.optim.AdamW(model.parameters(), lr=arg.lr, weight_decay=arg.wd)
 
+        seen = 0
+
         for e in range(arg.epochs):
 
             if arg.inc_anneal is not None:
@@ -123,11 +130,15 @@ def go(arg):
 
                 opt.step()
 
+                tbw.add_scalar('rgat/train-loss', float(loss.item()), seen)
+                seen+=1
+
             # Evaluate
             if e % arg.eval == 0:
 
                 prt(f'epoch {e},  loss {loss.item():.2}', end='')
                 prt(f',    train cumulative {float(correct / len(train_idx)):.2} ({correct}/{len(train_idx)})', end='')
+                tbw.add_scalar('rgat/train-cumulative', float(correct / len(train_idx)), e)
 
                 with torch.no_grad():
 
@@ -146,6 +157,7 @@ def go(arg):
 
                     trn_accuracy = correct/len(train_idx)
                     prt(f',    train accuracy {float(trn_accuracy):.2} ({correct}/{len(train_idx)})', end='')
+                    tbw.add_scalar('transformer/train-accuracy', float(trn_accuracy), e)
 
                     correct = 0
                     for fr in range(0, len(test_idx), arg.batch*2):
@@ -159,6 +171,8 @@ def go(arg):
 
                     tst_accuracy = correct / len(test_idx)
                     prt(f',   test accuracy {float(tst_accuracy):.2} ({correct}/{len(test_idx)})')
+                    tbw.add_scalar('rgat/test-accuracy', float(tst_accuracy), e)
+
 
             if torch.cuda.is_available():
                 del loss # clear memory
@@ -233,6 +247,10 @@ if __name__ == "__main__":
     parser.add_argument("-F", "--final", dest="final",
                         help="Use the canonical test set instead of a validation split.",
                         action="store_true")
+
+    parser.add_argument("-T", "--tb_dir", dest="tb_dir",
+                        help="Data directory",
+                        default=None)
 
     parser.add_argument("--limit",
                         dest="limit",
