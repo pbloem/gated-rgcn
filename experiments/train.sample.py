@@ -111,7 +111,8 @@ def go(arg):
 
             model.train(True)
 
-            model.precompute_globals()
+            if e % arg.pre_every == 0:
+                model.precompute_globals()
 
             correct = 0
             for fr in trange(0, len(train_idx), arg.batch):
@@ -135,7 +136,8 @@ def go(arg):
 
             # Evaluate
             if e % arg.eval == 0:
-                print(f'\nPeak gpu memory use is {torch.cuda.max_memory_cached() / 1e9:.2} Gb')
+                if torch.cuda.is_available():
+                    print(f'\nPeak gpu memory use is {torch.cuda.max_memory_cached() / 1e9:.2} Gb')
 
                 prt(f'epoch {e},  loss {loss.item():.2}', end='')
                 prt(f',    train cumulative {float(correct / len(train_idx)):.2} ({correct}/{len(train_idx)})', end='')
@@ -311,6 +313,11 @@ if __name__ == "__main__":
                         dest="eval",
                         help="Number of epochs between evaluations (if no repeats).",
                         default=5, type=int)
+
+    parser.add_argument("--precompute-every",
+                        dest="pre_every",
+                        help="Number of epochs between recomputing the cached global edge weights.",
+                        default=1, type=int)
 
     parser.add_argument("--incdo",
                         dest="incdo",
