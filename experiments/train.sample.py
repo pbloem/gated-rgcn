@@ -36,6 +36,14 @@ def go(arg):
     global repeats
     repeats = arg.repeats
 
+    if arg.seed < 0:
+        seed = random.randint(0, 1000000)
+        print('random seed: ', seed)
+    else:
+        seed = arg.seed
+    torch.manual_seed(seed)
+    random.seed(seed)
+
     tbw = SummaryWriter(log_dir=arg.tb_dir)
 
     dev = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -363,6 +371,11 @@ if __name__ == "__main__":
     parser.add_argument("--full-eval", dest="full_eval",
                         help="Do a full graph sample for evaluation (may be very memory-intensive).",
                         action="store_true")
+
+    parser.add_argument("--seed",
+                        dest="seed",
+                        help="RNG seed. Negative for random",
+                        default=-1, type=int)
 
     options = parser.parse_args()
 
