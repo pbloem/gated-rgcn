@@ -131,10 +131,11 @@ def go(arg):
                 opt.step()
 
                 tbw.add_scalar('rgat/train-loss', float(loss.item()), seen)
-                seen+=1
+                seen += arg.batch
 
             # Evaluate
             if e % arg.eval == 0:
+                print(f'\nPeak gpu memory use is {torch.cuda.max_memory_cached() / 1e9:.2} Gb')
 
                 prt(f'epoch {e},  loss {loss.item():.2}', end='')
                 prt(f',    train cumulative {float(correct / len(train_idx)):.2} ({correct}/{len(train_idx)})', end='')
@@ -172,7 +173,6 @@ def go(arg):
                     tst_accuracy = correct / len(test_idx)
                     prt(f',   test accuracy {float(tst_accuracy):.2} ({correct}/{len(test_idx)})')
                     tbw.add_scalar('rgat/test-accuracy', float(tst_accuracy), e)
-
 
             if torch.cuda.is_available():
                 del loss # clear memory
