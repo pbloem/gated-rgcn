@@ -54,9 +54,6 @@ def here(subpath=None):
 
     return os.path.abspath(os.path.join(os.path.dirname(__file__), '../..', subpath))
 
-def contains_nan(tensor):
-    return bool((tensor != tensor).sum() > 0)
-
 def adj(edges, num_nodes, cuda=False):
     """
     Computes a sparse adjacency matrix for the given graph (the adjacency matrices of all relations are stacked horizontally).
@@ -387,6 +384,35 @@ def itmax(indices, values, size, its=10, p=2, row=True):
 
     return sum_sparse(indices, values * weights, size, row=row)
 
+def schedule(epoch, schedule):
+    """
+    Provides a piecewise linear schedule for some parameter
+
+    :param epoch:
+    :param schedule: Dictionary of integer key and floating point value pairs
+    :return:
+    """
+
+    schedule = [(k, v) for k, v in schedule.items()]
+    schedule = sorted(schedule, key = lambda x : x[0])
+
+    for i, (k, v) in enumerate(schedule):
+
+        if epoch <= k:
+            if i == 0:
+                return v
+            else:
+                # interpolate between i-1 and 1
+
+                kl, vl = schedule[i-1]
+                rng = k - kl
+
+                prop = (epoch - kl) / rng
+                propl = 1.0 - prop
+
+                return propl * vl + prop * v
+
+    return v
 
 def contains_nan(input):
     if (not isinstance(input, torch.Tensor)) and isinstance(input, Iterable):
@@ -405,3 +431,6 @@ def contains_inf(input):
         return False
     else:
         return bool(torch.isinf(input).sum() > 0)
+
+
+

@@ -115,7 +115,9 @@ def go(arg):
                 if arg.inc_anneal == 'linear':
                     model.set('incdo', arg.incdo * (1.0 - (e/arg.epochs)))
                 else:
-                    raise Exception(f'{arg.inc_anneal}')
+                    schedule = eval(arg.inc_anneal)
+                    val = util.schedule(e, schedule)
+                    model.set('incdo', val)
 
             model.train(True)
 
@@ -168,7 +170,7 @@ def go(arg):
 
                     trn_accuracy = correct/len(train_idx)
                     prt(f',    train accuracy {float(trn_accuracy):.2} ({correct}/{len(train_idx)})', end='')
-                    tbw.add_scalar('transformer/train-accuracy', float(trn_accuracy), e)
+                    tbw.add_scalar('rgat/train-accuracy', float(trn_accuracy), e)
 
                     correct = 0
                     for fr in range(0, len(test_idx), arg.batch*2):
