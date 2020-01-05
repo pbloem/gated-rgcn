@@ -8,7 +8,7 @@ import torch.nn.functional as F
 
 from math import sqrt
 
-import sys, random
+import sys, random, math
 
 import heapq
 
@@ -45,7 +45,7 @@ def heapselect(generator, keyfunc, k):
 
     for value in generator:
         key = - keyfunc(value)
-        # -- we flip the order so that the _largest_ element gest ejected if the heap is too big.
+        # -- we flip the order so that the _largest_ element gets ejected if the heap is too big.
 
         if len(heap) < k:
             heapq.heappush(heap, (key, value))
@@ -53,6 +53,20 @@ def heapselect(generator, keyfunc, k):
             heapq.heappushpop(heap, (key, value))
 
     return [pair[1] for pair in heap]
+
+def wrs_gen(elem, k, weight_function):
+    """
+
+    :param elem: Generator over the elments
+    :param k: Number of elements to sample
+    :param weight_function: Function that returns a logarithmic weight given an element
+    :return:
+    """
+
+    key = lambda x : - (math.log(random.random()) / math.exp(weight_function(x)))
+    # -- note the negative key (since heapselect takes the smallest elems)
+
+    return heapselect(elem, k, key)
 
 def pad(elems, max, padelem=0, copy=False):
     ln = len(elems)
@@ -236,10 +250,10 @@ class Batch():
 
 class SamplingClassifier(nn.Module):
 
-    def __init__(self, graph, n, num_cls, depth=2, emb=16, max_edges=37, boost=0, bases=None, maskid=False, dropout=None, forward_mp=False, csample=None, **kwargs):
+    def __init__(self, graph, n, num_cls, depth=2, emb=16, ksample=50, boost=0, bases=None, maskid=False, dropout=None, forward_mp=False, csample=None, **kwargs):
         super().__init__()
 
-        self.r, self.n, self.max_edges = len(graph.keys()), n, max_edges
+        self.r, self.n, self.ksample = len(graph.keys()), n, ksample
         self.maskid = maskid
 
         self.graph = convert(graph, n)
@@ -258,7 +272,8 @@ class SamplingClassifier(nn.Module):
             if forward_mp and d != 0:
                 layers.append(SimpleRGCN(self.graph, self.r, emb, bases=bases, dropout=dropout, **kwargs))
 
-            layers.append(Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys, toqueries=self.toqueries, max_edges=max_edges, boost=boost, csample=csample, **kwargs))
+            layers.append(Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
+                                 toqueries=self.toqueries, ksample=ksample, boost=boost, csample=csample, **kwargs))
 
         layers += [SimpleRGCN(self.graph, self.r, emb, bases=bases, dropout=dropout) for _ in range(depth)]
 
@@ -276,6 +291,8 @@ class SamplingClassifier(nn.Module):
 
         else:
             raise Exception(f'parameter {parm} not recognized.')
+
+
     def precompute_globals(self):
         """
         Computes global weight for each edge based on the current embeddings. These are periodically updated (i.e.
@@ -366,10 +383,12 @@ class SampleAll(nn.Module):
 
 class Sample(nn.Module):
     """
-    Extends a subgraph batch by computing global self attention scores and sampling accoridng to their magnitude
+    Extends a subgraph batch by computing global self attention scores and sampling according to their magnitude.
+
+    Samples a _fixed_ number of extra edges (if enough incident edges are available)
     """
 
-    def __init__(self, graph, nodes=None, relations=None, tokeys=None, toqueries=None, max_edges=200, boost=0.0, csample=None, incdo=None, **kwargs):
+    def __init__(self, graph, nodes=None, relations=None, tokeys=None, toqueries=None, ksample=50, boost=0.0, csample=None,  **kwargs):
         super().__init__()
 
         self.graph = graph
@@ -379,11 +398,10 @@ class Sample(nn.Module):
         self.tokeys    = tokeys
         self.toqueries = toqueries
 
-        self.max_edges = max_edges
+        self.ksample = ksample
         self.boost = boost
 
         self.csample = csample
-        self.incdo = incdo
 
     def forward(self, batch : Batch, globals):
         """
@@ -400,67 +418,76 @@ class Sample(nn.Module):
 
             for bi in range(b):
 
-                # we can sample this many edges (the total maximum minus the number that have already been sampled)
-                max_edges = self.max_edges - len(batch.edgesets[bi])
-
-                if max_edges <= 0:
-                    continue
-
                 # candidates = batch.inc_edges(bi)
                 # cflat = list(candidates)
 
                 tic()
                 if self.training and self.csample is not None:
-                    # cflat.sort(key=lambda edge : - globals[edge])
-                    # cflat = cflat[:self.csample]
+                    # Sample a list of candidates using the pre-computed scores
 
-                    cflat = heapselect(generator=batch.gen_inc_edges(bi, do=self.incdo), keyfunc=lambda edge : - globals[edge], k=self.csample)
-
+                    # cflat = heapselect(generator=batch.gen_inc_edges(bi, do=self.incdo), keyfunc=lambda edge : - globals[edge], k=self.csample)
+                    cflat = wrs_gen(batch.gen_inc_edges(bi), keyfunc=lambda edge : globals[edge], k=self.csample)
                 else:
                     cflat = list(batch.gen_inc_edges(bi))
 
-                embeddings = torch.cat([batch.embeddings(), self.nodes], dim=0)  # probably expensive
-
-                si, pi, oi = [s for s, _, _ in cflat], [p for _, p, _ in cflat], [o for _, _, o in cflat]
-                si, oi = batch.batch_indices(si), batch.batch_indices(oi)
-
-                semb, pemb, oemb, = embeddings[si, :], self.relations[pi, :], embeddings[oi, :]
-
-                # compute the score (bilinear dot product)
-                semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
-                oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
-
-                dots = (semb * pemb * oemb).sum(dim=1) / e
+                cflat = torch.tensor(cflat)
 
                 if self.training:
 
-                    # sort by score (this allows us to cut off the low-scoring edges if we sample too many)
-                    dots, indices = torch.sort(dots, descending=True)
+                    # Reduce the candidates further by reservoir sampling with the actual weights
+                    embeddings = torch.cat([batch.embeddings(), self.nodes], dim=0)  # probably expensive
 
-                    # sample candidates by score
-                    bern = ds.Bernoulli(torch.sigmoid(dots + self.boost))
-                    mask = bern.sample().to(torch.bool)  # note that this is detached, no gradient here.
-                    # -- The dots receive a gradient in later layers when they are used for global attention
+                    si, pi, oi = [s for s, _, _ in cflat], [p for _, p, _ in cflat], [o for _, _, o in cflat]
+                    si, oi = batch.batch_indices(si), batch.batch_indices(oi)
 
-                    # cut off the low scoring edges
-                    if mask.sum() > max_edges:
+                    semb, pemb, oemb, = embeddings[si, :], self.relations[pi, :], embeddings[oi, :]
 
-                        # find the cutoff point
-                        cs = mask.cumsum(dim=0) <= max_edges
-                        mask = mask * cs
+                    # compute the score (bilinear dot product)
+                    semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
+                    oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
 
-                    # reverse-sort the mask
-                    mask = mask[indices.sort()[1]]
+                    dots = (semb * pemb * oemb).sum(dim=1) / e
 
-                    cand_sampled = []
-                    for i, c in enumerate(cflat):
-                        if mask[i]:
-                            cand_sampled.append(c)
+                    # WRS with a full sort (optimize later)
+                    u = torch.rand(*dots.size(), device=d(dots))
+                    weights = dots / u.exp()
 
-                    if len(cand_sampled) > 0: # to avoid errors downstream. Hopefully, this doesn't happen too often
-                        cand_sampled.extend(cflat[:20])
+                    weights, indices = torch.sort(weights, descending=True)
+                    indices = indices[:self.ksample]
+
+                    cand_sampled = cflat[indices, :]
+                    cand_sampled = [(s.item(), p.item(), o.item()) for s, p, o in cand_sampled]
+
+                    # # sort by score (this allows us to cut off the low-scoring edges if we sample too many)
+                    # dots, indices = torch.sort(dots, descending=True)
+                    #
+                    # # sample candidates by score
+                    # bern = ds.Bernoulli(torch.sigmoid(dots + self.boost))
+                    # mask = bern.sample().to(torch.bool)  # note that this is detached, no gradient here.
+                    # # -- The dots receive a gradient in later layers when they are used for global attention
+                    #
+                    # # cut off the low scoring edges
+                    # if mask.sum() > max_edges:
+                    #
+                    #     # find the cutoff point
+                    #     cs = mask.cumsum(dim=0) <= max_edges
+                    #     mask = mask * cs
+                    #
+                    # # reverse-sort the mask
+                    # mask = mask[indices.sort()[1]]
+                    #
+                    # cand_sampled = []
+                    # for i, c in enumerate(cflat):
+                    #     if mask[i]:
+                    #         cand_sampled.append(c)
+                    #
+                    # if len(cand_sampled) > 0: # to avoid errors downstream. Hopefully, this doesn't happen too often
+                    #     cand_sampled.extend(cflat[:20])
+
                 else:
                     cand_sampled = cflat
+
+
 
                 batch.add_edges(cand_sampled, bi)
 

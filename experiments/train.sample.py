@@ -95,7 +95,7 @@ def go(arg):
 
         train_idx, test_idx = [n.item() for n in train_idx], [n.item() for n in test_idx]
 
-        model = kgmodels.SamplingClassifier(graph=edges, n=N, depth=arg.depth, emb=arg.emb, max_edges=arg.max_edges,
+        model = kgmodels.SamplingClassifier(graph=edges, n=N, depth=arg.depth, emb=arg.emb, ksample=arg.ksample,
                 num_cls=num_cls, boost=arg.boost, bases=arg.bases, maskid=arg.maskid, dropout=arg.do, forward_mp=arg.forward_mp,
                 csample=arg.csample, incdo=arg.incdo)
 
@@ -309,10 +309,10 @@ if __name__ == "__main__":
                         help="Amount of diffusion in the fan graph.",
                         default=5, type=int)
 
-    parser.add_argument("--max-edges",
-                        dest="max_edges",
-                        help="Maximum number of edges in sampled graph.",
-                        default=250, type=int)
+    parser.add_argument("--ksample",
+                        dest="ksample",
+                        help="Number of edges to add per sampling layer.",
+                        default=50, type=int)
 
     parser.add_argument("--boost",
                         dest="boost",
