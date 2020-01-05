@@ -63,10 +63,10 @@ def wrs_gen(elem, k, weight_function):
     :return:
     """
 
-    key = lambda x : - (math.log(random.random()) / math.exp(weight_function(x)))
+    keyfunc = lambda x : - (math.log(random.random()) / math.exp(weight_function(x)))
     # -- note the negative key (since heapselect takes the smallest elems)
 
-    return heapselect(elem, k, key)
+    return heapselect(elem, k=k, keyfunc=keyfunc)
 
 def pad(elems, max, padelem=0, copy=False):
     ln = len(elems)
@@ -426,7 +426,7 @@ class Sample(nn.Module):
                     # Sample a list of candidates using the pre-computed scores
 
                     # cflat = heapselect(generator=batch.gen_inc_edges(bi, do=self.incdo), keyfunc=lambda edge : - globals[edge], k=self.csample)
-                    cflat = wrs_gen(batch.gen_inc_edges(bi), keyfunc=lambda edge : globals[edge], k=self.csample)
+                    cflat = wrs_gen(batch.gen_inc_edges(bi), weight_function=lambda edge : globals[edge], k=self.csample)
                 else:
                     cflat = list(batch.gen_inc_edges(bi))
 
