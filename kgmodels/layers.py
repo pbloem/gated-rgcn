@@ -81,13 +81,15 @@ class GCN(nn.Module):
         graph = torch.sparse.FloatTensor(indices=indices.t(), values=vals, size=size) # will this get cuda'd properly?
         self.register_buffer('graph', graph)
 
-        lim = sqrt(6 / (emb + emb))
 
         if bases is None:
+            lim = sqrt(6 / (emb + emb))
             self.weights = nn.Parameter(torch.FloatTensor(r, emb, emb).uniform_(-lim, lim) )
             self.bases = None
         else:
+            lim = sqrt(6 / (r + bases))
             self.comps = nn.Parameter(torch.FloatTensor(r, bases).uniform_(-lim, lim) )
+            lim = sqrt(6 / (emb + emb))
             self.bases = nn.Parameter(torch.FloatTensor(bases, emb, emb).uniform_(-lim, lim) )
 
         if unify == 'sum':
@@ -152,13 +154,14 @@ class GCNFirst(nn.Module):
         graph = torch.sparse.FloatTensor(indices=indices.t(), values=vals, size=size) # will this get cuda'd properly?
         self.register_buffer('graph', graph)
 
-        lim = sqrt(6 / (n + emb))
-
         if bases is None:
+            lim = sqrt(6 / (n + emb))
             self.weights = nn.Parameter(torch.FloatTensor(r, n, emb).uniform_(-lim, lim) )
             self.bases = None
         else:
+            lim = sqrt(6 / (r + bases))
             self.comps = nn.Parameter(torch.FloatTensor(r, bases).uniform_(-lim, lim) )
+            lim = sqrt(6 / (n + emb))
             self.bases = nn.Parameter(torch.FloatTensor(bases, n, emb).uniform_(-lim, lim) )
 
     def forward(self, x=None, conditional=None):
