@@ -92,7 +92,6 @@ class GraphBlock(nn.Module):
 
         if self.res:
             x = x + res
-            print('res!')
         if self.norm:
             x = self.bn1(x)
 
@@ -101,7 +100,6 @@ class GraphBlock(nn.Module):
 
         if self.res:
             x = x + res
-            print('res2!')
         if self.norm:
             x = self.bn2(x)
 
