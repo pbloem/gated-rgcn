@@ -24,7 +24,6 @@ from argparse import ArgumentParser
 
 EPSILON = 0.000000001
 
-
 global repeats
 
 def prt(str, end='\n'):

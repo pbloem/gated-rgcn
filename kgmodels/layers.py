@@ -81,12 +81,14 @@ class GCN(nn.Module):
         graph = torch.sparse.FloatTensor(indices=indices.t(), values=vals, size=size) # will this get cuda'd properly?
         self.register_buffer('graph', graph)
 
+        lim = sqrt(6 / (emb + emb))
+
         if bases is None:
-            self.weights = nn.Parameter(torch.FloatTensor(r, emb, emb).uniform_(-sqrt(emb), sqrt(emb)) )
+            self.weights = nn.Parameter(torch.FloatTensor(r, emb, emb).uniform_(-lim, lim) )
             self.bases = None
         else:
-            self.comps = nn.Parameter(torch.FloatTensor(r, bases).uniform_(-sqrt(bases), sqrt(bases)) )
-            self.bases = nn.Parameter(torch.FloatTensor(bases, emb, emb).uniform_(-sqrt(emb), sqrt(emb)) )
+            self.comps = nn.Parameter(torch.FloatTensor(r, bases).uniform_(-lim, lim) )
+            self.bases = nn.Parameter(torch.FloatTensor(bases, emb, emb).uniform_(-lim, lim) )
 
         if unify == 'sum':
             self.unify = SumUnify()
@@ -106,7 +108,7 @@ class GCN(nn.Module):
         rn, n = self.graph.size()
         r = rn // n
 
-        n, e = x.size()
+        n, e =  x.size()
 
         if conditional is not None:
             x = x + conditional
@@ -124,6 +126,66 @@ class GCN(nn.Module):
         h = torch.einsum('rij, rnj -> nri', weights, h)
 
         return self.unify(h)
+
+class GCNFirst(nn.Module):
+    """
+    First graph convolution. No input (one-hot vectors assumed)
+
+    Note that unification is always sum.
+    """
+    def __init__(self, edges, n, emb=16, bases=None, **kwargs):
+
+        super().__init__()
+
+        self.emb = emb
+
+        indices, size = util.adj(edges, n, vertical=False)
+
+        r, rn = size
+        r = rn//n
+
+        ih, iw = indices.size()
+        vals = torch.ones((ih, ), dtype=torch.float)
+
+        vals = vals / util.sum_sparse(indices, vals, size)
+
+        graph = torch.sparse.FloatTensor(indices=indices.t(), values=vals, size=size) # will this get cuda'd properly?
+        self.register_buffer('graph', graph)
+
+        lim = sqrt(6 / (n + emb))
+
+        if bases is None:
+            self.weights = nn.Parameter(torch.FloatTensor(r, n, emb).uniform_(-lim, lim) )
+            self.bases = None
+        else:
+            self.comps = nn.Parameter(torch.FloatTensor(r, bases).uniform_(-lim, lim) )
+            self.bases = nn.Parameter(torch.FloatTensor(bases, n, emb).uniform_(-lim, lim) )
+
+    def forward(self, x=None, conditional=None):
+        """
+        :param x: E by N matrix of node embeddings.
+
+        :return:
+        """
+        n, rn = self.graph.size()
+        r = rn // n
+        e = self.emb
+
+        assert x is None and conditional is None
+
+        if self.bases is not None:
+            weights = torch.einsum('rb, bij -> rij', self.comps, self.bases)
+        else:
+            weights = self.weights
+
+        assert weights.size() == (r, n, e)
+
+        # Apply weights and sum over relations
+        h = torch.mm(self.graph, weights.view(r*n, e))
+
+        assert h.size() == (n, e)
+
+        return h
 
 class GAT(nn.Module):
     """

@@ -6,13 +6,19 @@ import layers
 
 class NodeClassifier(nn.Module):
 
-    def __init__(self, edges, n, numcls, mixer='gcn', emb=16, depth=2, **kwargs):
+    def __init__(self, edges, n, numcls, mixer='gcn', emb=16, depth=2, sep_emb=False, **kwargs):
 
         super().__init__()
 
-        self.nodes = nn.Parameter(torch.randn(n, emb))
+        self.se = sep_emb
+        r = len(edges.keys())
 
-        gblocks = [GraphBlock(edges, n, mixer, emb, **kwargs) for _ in range(depth)]
+        if self.se:
+            self.nodes = None
+        else:
+            self.nodes = nn.Parameter(torch.randn(n, emb))
+
+        gblocks = [GraphBlock(edges, n, mixer, emb, gcn_first=((i==0) if self.se else False), **kwargs) for i in range(depth)]
         self.gblocks = nn.Sequential(*gblocks)
 
         self.cls = nn.Linear(emb, numcls)
@@ -40,24 +46,35 @@ class GraphBlock(nn.Module):
 
     """
 
-    def __init__(self, edges, n, mixer='gcn', emb=16, mult=4, dropout=None, **kwargs):
+    def __init__(self, edges, n, mixer='gcn', emb=16, mult=4, dropout=None, gcn_first=False,
+                 res=True, norm=True, ff=True, **kwargs):
 
         super().__init__()
 
+        self.res = res
+        self.norm = norm
+
         if mixer == 'gcn':
-            self.mixer = layers.GCN(edges, n, emb=emb, **kwargs)
+            if gcn_first:
+                self.mixer = layers.GCNFirst(edges, n, emb=emb, **kwargs)
+            else:
+                self.mixer = layers.GCN(edges, n, emb=emb, **kwargs)
         elif mixer == 'gat':
             self.mixer = layers.GAT(edges, n, emb=emb, **kwargs)
         else:
             raise Exception(f'Mixer {mixer} not recognized')
 
-        self.bn1 = nn.BatchNorm1d(emb)
-        self.bn2 = nn.BatchNorm1d(emb)
+        if self.norm:
+            self.bn1 = nn.BatchNorm1d(emb)
+            self.bn2 = nn.BatchNorm1d(emb)
 
-        self.ff = nn.Sequential(
-            nn.Linear(emb, mult*emb), nn.ReLU(),
-            nn.Linear(emb*mult, emb, bias=False)
-        )
+        if ff:
+            self.ff = nn.Sequential(
+                nn.Linear(emb, mult*emb), nn.ReLU(),
+                nn.Linear(emb*mult, emb, bias=False)
+            )
+        else:
+            self.ff = nn.ReLU()
 
         self.do = None if dropout is None else nn.Dropout(dropout)
 
@@ -67,10 +84,26 @@ class GraphBlock(nn.Module):
 
         :return:
         """
+        res = x if x is not None else 0.0
+        # -- No res connection if the input has separate embeddings per relation
+        #    (because the mixer output won't)
 
-        x = self.bn1(self.mixer(x, conditional=conditional) + x)
+        x = self.mixer(x, conditional=conditional)
 
-        x = self.bn2(self.ff(x) + x)
+        if self.res:
+            x = x + res
+            print('res!')
+        if self.norm:
+            x = self.bn1(x)
+
+        res = x
+        x = self.ff(x)
+
+        if self.res:
+            x = x + res
+            print('res2!')
+        if self.norm:
+            x = self.bn2(x)
 
         if self.do:
             x = self.do(x)

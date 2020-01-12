@@ -54,9 +54,10 @@ def here(subpath=None):
 
     return os.path.abspath(os.path.join(os.path.dirname(__file__), '../..', subpath))
 
-def adj(edges, num_nodes, cuda=False):
+def adj(edges, num_nodes, cuda=False, vertical=True):
     """
-    Computes a sparse adjacency matrix for the given graph (the adjacency matrices of all relations are stacked horizontally).
+    Computes a sparse adjacency matrix for the given graph (the adjacency matrices of all
+    relations are stacked vertically).
 
     :param edges: Dictionary representing the edges
     :param i2r: list of relations
@@ -66,7 +67,7 @@ def adj(edges, num_nodes, cuda=False):
     ST = torch.cuda.sparse.FloatTensor if cuda else torch.sparse.FloatTensor
 
     r, n = len(edges.keys()), num_nodes
-    size = (r*n, n)
+    size = (r*n, n) if vertical else (n, r*n)
 
     from_indices = []
     upto_indices = []
@@ -75,7 +76,10 @@ def adj(edges, num_nodes, cuda=False):
 
         offset = rel * n
 
-        fr = [offset + f for f in fr]
+        if vertical:
+            fr = [offset + f for f in fr]
+        else:
+            to = [offset + t for t in to]
 
         from_indices.extend(fr)
         upto_indices.extend(to)

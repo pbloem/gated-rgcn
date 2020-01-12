@@ -90,22 +90,8 @@ def go(arg):
         """
         model = kgmodels.NodeClassifier(edges=edges, n=N, depth=arg.depth, emb=arg.emb, mixer=arg.mixer, numcls=num_cls,
                                         dropout=arg.do, bases=arg.bases, norm_method=arg.norm_method, heads=arg.heads,
-                                        unify=arg.unify, dropin=arg.dropin)
-
-        # cheat
-        # h, rn = arg.emb//2, range(arg.emb)
-        # model.nodes.data *= 0.0
-        # model.nodes.data[0, :h] += 1.0
-        # model.nodes.data[1, h:] += 1.0
-        # model.nodes.required_grad = False
-        #
-        # model.gblocks[0].mixer.weights.data[:, :, :] *= 0.0
-        # model.gblocks[0].mixer.weights.data[:2, rn, rn] += 1.0
-        # model.gblocks[0].mixer.weights.requires_grad = False
-        #
-        # model.gblocks[1].mixer.weights.data[:, :, :] *= 0.0
-        # model.gblocks[1].mixer.weights.data[:2, rn, rn] += 1.0
-        # model.gblocks[1].mixer.weights.requires_grad = False
+                                        unify=arg.unify, dropin=arg.dropin, sep_emb=arg.sep_emb, res=not arg.nores,
+                                        norm=not arg.nonorm, ff=not arg.noff)
 
         if torch.cuda.is_available():
             prt('Using CUDA.')
@@ -173,7 +159,7 @@ if __name__ == "__main__":
 
     parser.add_argument("-d", "--depth",
                         dest="depth",
-                        help="Nr of attention layers.",
+                        help="Nr of layers.",
                         default=2, type=int)
 
     parser.add_argument("-E", "--embedding-size",
@@ -277,6 +263,23 @@ if __name__ == "__main__":
     parser.add_argument("--dropin", dest="dropin",
                         help="Randomly mask out connections by atte tion weight.",
                         action="store_true")
+
+    parser.add_argument("--separate-embeddings", dest="sep_emb",
+                        help="Separate embeddings per relation (expensive, but closer to original RGCN).",
+                        action="store_true")
+
+    parser.add_argument("--no-res", dest="nores",
+                        help="Disable residual connections.",
+                        action="store_true")
+
+    parser.add_argument("--no-norm", dest="nonorm",
+                        help="Disable batch norm.",
+                        action="store_true")
+
+    parser.add_argument("--no-ff", dest="noff",
+                        help="Disable local feed-forward (activation only).",
+                        action="store_true")
+
 
     options = parser.parse_args()
 
