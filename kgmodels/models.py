@@ -2,7 +2,7 @@ import torch, os, sys
 
 from torch import nn
 
-import layers
+import layers, util
 
 class NodeClassifier(nn.Module):
 
@@ -74,7 +74,11 @@ class GraphBlock(nn.Module):
                 nn.Linear(emb*mult, emb, bias=False)
             )
         else:
-            self.ff = nn.ReLU()
+            self.bias = nn.Parameter(torch.zeros(emb) )
+            self.ff = nn.Sequential(
+                util.Lambda(lambda x : x + self.bias),
+                nn.ReLU()
+            )
 
         self.do = None if dropout is None else nn.Dropout(dropout)
 

@@ -5,6 +5,8 @@ import torch.nn.functional as F
 
 from collections.abc import Iterable
 
+from torch import nn
+
 tics = []
 
 def tic():
@@ -177,6 +179,21 @@ def spmm(indices, values, size, xmatrix):
 
     sm = sparsemm(cuda)
     return sm(indices.t(), values, size, xmatrix)
+
+class Lambda(nn.Module):
+    def __init__(self, lambd):
+        super(Lambda, self).__init__()
+        self.lambd = lambd
+    def forward(self, x):
+        return self.lambd(x)
+
+class Debug(nn.Module):
+    def __init__(self, lambd):
+        super(Debug, self).__init__()
+        self.lambd = lambd
+    def forward(self, x):
+        self.lambd(x)
+        return x
 
 def batchmm(indices, values, size, xmatrix, cuda=None):
     """
