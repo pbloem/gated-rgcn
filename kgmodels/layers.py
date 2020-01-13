@@ -125,7 +125,7 @@ class GCN(nn.Module):
             weights = self.weights
 
         # Apply weights
-        h = torch.einsum('rij, rnj -> nri', weights, h)
+        h = torch.einsum('rih, rnh -> nri', weights, h)
 
         return self.unify(h)
 

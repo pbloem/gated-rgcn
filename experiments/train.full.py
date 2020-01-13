@@ -102,7 +102,10 @@ def go(arg):
             train_lbl = train_lbl.cuda()
             test_lbl  = test_lbl.cuda()
 
-        opt = torch.optim.AdamW(model.parameters(), lr=arg.lr, weight_decay=arg.wd)
+        if arg.wd_explicit:
+            opt = torch.optim.Adam(model.parameters(), lr=arg.lr)
+        else:
+            opt = torch.optim.AdamW(model.parameters(), lr=arg.lr, weight_decay=arg.wd)
 
         for e in range(arg.epochs):
 
@@ -112,6 +115,11 @@ def go(arg):
 
             cls = model()[train_idx, :]
             loss = F.cross_entropy(cls, train_lbl)
+
+            if arg.wd_explicit:
+                l2 = sum([p.pow(2).sum() for p in model.parameters()])
+                loss = loss + arg.wd * l2
+
             loss.backward()
 
             opt.step()
@@ -180,6 +188,10 @@ if __name__ == "__main__":
                         help="Weight decay (using AdamW implementation).",
                         default=0.0, type=float)
 
+    parser.add_argument("--wd-explicit", dest="wd_explicit",
+                        help="Add the weight decay explicitly as an l2 loss term instead of using AdamW.",
+                        action="store_true")
+
     parser.add_argument("--do",
                         dest="do",
                         help="Dropout",
@@ -236,7 +248,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--random-base",
                         dest="base",
-                        help="Base network ofr the random graph experiment.",
+                        help="Base network for the random graph experiment.",
                         default='aifb', type=str)
 
     parser.add_argument("--random-depth",
