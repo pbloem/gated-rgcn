@@ -88,7 +88,10 @@ def go(arg):
         """
         Define model
         """
-        model = kgmodels.NodeClassifier(edges=edges, n=N, depth=arg.depth, emb=arg.emb, mixer=arg.mixer, numcls=num_cls,
+        if arg.mixer == 'classic':
+            model = kgmodels.RGCNClassic(edges=edges, n=N, numcls=num_cls, emb=arg.emb, bases=arg.bases)
+        else:
+            model = kgmodels.NodeClassifier(edges=edges, n=N, depth=arg.depth, emb=arg.emb, mixer=arg.mixer, numcls=num_cls,
                                         dropout=arg.do, bases=arg.bases, norm_method=arg.norm_method, heads=arg.heads,
                                         unify=arg.unify, dropin=arg.dropin, sep_emb=arg.sep_emb, res=not arg.nores,
                                         norm=not arg.nonorm, ff=not arg.noff)

@@ -1,8 +1,106 @@
 import torch, os, sys
 
 from torch import nn
+import torch.nn.functional as F
+from math import sqrt
 
 import layers, util
+
+class RGCNClassic(nn.Module):
+    """
+    Classic RGCN
+    """
+
+    def __init__(self, edges, n, numcls, emb=16, bases=None):
+
+        super().__init__()
+
+        self.emb = emb
+        self.bases = bases
+        self.numcls = numcls
+
+        # horizontally and vertically stacked versions of the adjacency graph
+        hor_ind, hor_size = util.adj(edges, n, vertical=False)
+        ver_ind, ver_size = util.adj(edges, n, vertical=True)
+
+        _, rn = hor_size
+        r = rn//n
+
+        hor_vals = torch.ones(hor_ind.size(0), dtype=torch.float)
+        hor_vals = hor_vals / util.sum_sparse(hor_ind, hor_vals, hor_size)
+
+        hor_graph = torch.sparse.FloatTensor(indices=hor_ind.t(), values=hor_vals, size=hor_size)
+        self.register_buffer('hor_graph', hor_graph)
+
+        ver_vals = torch.ones(ver_ind.size(0), dtype=torch.float)
+        ver_vals = ver_vals / util.sum_sparse(ver_ind, ver_vals, ver_size)
+
+        ver_graph = torch.sparse.FloatTensor(indices=ver_ind.t(), values=ver_vals, size=ver_size)
+        self.register_buffer('ver_graph', ver_graph)
+
+        # layer 1 weights
+        if bases is None:
+            lim = sqrt(6 / (n + emb))
+            self.weights1 = nn.Parameter(torch.FloatTensor(r, n, emb).uniform_(-lim, lim) )
+            self.bases1 = None
+        else:
+            lim = sqrt(6 / (r + bases))
+            self.comps1 = nn.Parameter(torch.FloatTensor(r, bases).uniform_(-lim, lim) )
+            lim = sqrt(6 / (n + emb))
+            self.bases1 = nn.Parameter(torch.FloatTensor(bases, n, emb).uniform_(-lim, lim) )
+
+        # layer 2 weights
+        if bases is None:
+            lim = sqrt(6 / (emb + numcls))
+            self.weights2 = nn.Parameter(torch.FloatTensor(r, emb, numcls).uniform_(-lim, lim) )
+            self.bases2 = None
+        else:
+            lim = sqrt(6 / (r + bases))
+            self.comps2 = nn.Parameter(torch.FloatTensor(r, bases).uniform_(-lim, lim) )
+            lim = sqrt(6 / (emb + numcls))
+            self.bases2 = nn.Parameter(torch.FloatTensor(bases, emb, numcls).uniform_(-lim, lim) )
+
+        self.bias1 = nn.Parameter(torch.zeros(emb))
+        self.bias2 = nn.Parameter(torch.zeros(numcls))
+
+    def forward(self):
+
+        ## Layer 1
+
+        n, rn = self.hor_graph.size()
+        r = rn // n
+        e = self.emb
+
+        if self.bases1 is not None:
+            weights = torch.einsum('rb, bij -> rij', self.comps1, self.bases1)
+        else:
+            weights = self.weights1
+
+        assert weights.size() == (r, n, e)
+
+        # Apply weights and sum over relations
+        h = torch.mm(self.hor_graph, weights.view(r*n, e))
+        assert h.size() == (n, e)
+
+        h = F.relu(h + self.bias1)
+
+        ## Layer 2
+
+        # Multiply adjacencies by hidden
+        h = torch.mm(self.ver_graph, h) # sparse mm
+        h = h.view(r, n, e) # new dim for the relations
+
+        if self.bases2 is not None:
+            weights = torch.einsum('rb, bij -> rij', self.comps2, self.bases2)
+        else:
+            weights = self.weights2
+
+        # Apply weights, sum over relations
+        h = torch.einsum('rhc, rnh -> nc', weights, h) # <- this may be the bug
+
+        assert h.size() == (n, self.numcls)
+
+        return h + self.bias2 #-- softmax is applied in the loss
 
 class NodeClassifier(nn.Module):
 

@@ -143,7 +143,7 @@ class GCNFirst(nn.Module):
 
         indices, size = util.adj(edges, n, vertical=False)
 
-        r, rn = size
+        _, rn = size
         r = rn//n
 
         ih, iw = indices.size()
