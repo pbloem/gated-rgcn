@@ -47,7 +47,7 @@ class RGCNClassic(nn.Module):
             self.bases1 = None
         else:
             self.comps1 = nn.Parameter(torch.FloatTensor(r, bases))
-            nn.init.xavier_uniform_(self.comps2, gain=nn.init.calculate_gain('relu'))
+            nn.init.xavier_uniform_(self.comps1, gain=nn.init.calculate_gain('relu'))
 
             self.bases1 = nn.Parameter(torch.FloatTensor(bases, n, emb))
             nn.init.xavier_uniform_(self.bases1, gain=nn.init.calculate_gain('relu'))
