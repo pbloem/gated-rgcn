@@ -10,6 +10,8 @@ VALPROP = 0.4
 REST = '.rest'
 INV  = '.inv'
 
+S = os.sep
+
 def load(name, final=False, limit=None, bidir=False):
     """
     Loads a knowledge graph dataset. Self connections are automatically added as a special relation
@@ -23,7 +25,7 @@ def load(name, final=False, limit=None, bidir=False):
               - edges: dictionary of edges (relation -> pair of lists cont. subject and object indices respectively)
     """
     # -- Check if the data has been cached for quick loading.
-    cachefile = util.here('data' + os.sep + name + os.sep + 'cache.pkl')
+    cachefile = util.here(f'data{S}{name}{S}cache{"fin" if final else "val"}.pkl')
     if os.path.isfile(cachefile) and limit is None:
         print('Using cached data.')
         with open(cachefile, 'rb') as file:

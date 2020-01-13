@@ -40,19 +40,24 @@ class RGCNClassic(nn.Module):
 
         # layer 1 weights
         if bases is None:
-            lim = sqrt(6 / (n + emb))
-            self.weights1 = nn.Parameter(torch.FloatTensor(r, n, emb).uniform_(-lim, lim) )
+            self.weights1 = nn.Parameter(torch.FloatTensor(r, n, emb))
+            nn.init.xavier_uniform_(self.weights1, gain=nn.init.calculate_gain('relu'))
+
+
             self.bases1 = None
         else:
             lim = sqrt(6 / (r + bases))
             self.comps1 = nn.Parameter(torch.FloatTensor(r, bases).uniform_(-lim, lim) )
+
             lim = sqrt(6 / (n + emb))
             self.bases1 = nn.Parameter(torch.FloatTensor(bases, n, emb).uniform_(-lim, lim) )
 
         # layer 2 weights
         if bases is None:
-            lim = sqrt(6 / (emb + numcls))
-            self.weights2 = nn.Parameter(torch.FloatTensor(r, emb, numcls).uniform_(-lim, lim) )
+
+            self.weights2 = nn.Parameter(torch.FloatTensor(r, emb, numcls) )
+            nn.init.xavier_uniform_(self.weights2, gain=nn.init.calculate_gain('relu'))
+
             self.bases2 = None
         else:
             lim = sqrt(6 / (r + bases))
@@ -60,8 +65,8 @@ class RGCNClassic(nn.Module):
             lim = sqrt(6 / (emb + numcls))
             self.bases2 = nn.Parameter(torch.FloatTensor(bases, emb, numcls).uniform_(-lim, lim) )
 
-        self.bias1 = nn.Parameter(torch.zeros(emb))
-        self.bias2 = nn.Parameter(torch.zeros(numcls))
+        self.bias1 = nn.Parameter(torch.FloatTensor(emb).zero_())
+        self.bias2 = nn.Parameter(torch.FloatTensor(numcls).zero_())
 
     def forward(self):
 

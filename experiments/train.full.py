@@ -102,10 +102,12 @@ def go(arg):
             train_lbl = train_lbl.cuda()
             test_lbl  = test_lbl.cuda()
 
-        if arg.wd_explicit:
-            opt = torch.optim.Adam(model.parameters(), lr=arg.lr)
-        else:
+        if arg.opt == 'adam':
+            opt = torch.optim.Adam(model.parameters(), lr=arg.lr, weight_decay=arg.wd)
+        elif arg.opt == 'adamw':
             opt = torch.optim.AdamW(model.parameters(), lr=arg.lr, weight_decay=arg.wd)
+        else:
+            raise Exception
 
         for e in range(arg.epochs):
 
@@ -116,9 +118,9 @@ def go(arg):
             cls = model()[train_idx, :]
             loss = F.cross_entropy(cls, train_lbl)
 
-            if arg.wd_explicit:
+            if arg.l2weight is not None:
                 l2 = sum([p.pow(2).sum() for p in model.parameters()])
-                loss = loss + arg.wd * l2
+                loss = loss + arg.l2weight * l2
 
             loss.backward()
 
@@ -188,9 +190,9 @@ if __name__ == "__main__":
                         help="Weight decay (using AdamW implementation).",
                         default=0.0, type=float)
 
-    parser.add_argument("--wd-explicit", dest="wd_explicit",
-                        help="Add the weight decay explicitly as an l2 loss term instead of using AdamW.",
-                        action="store_true")
+    parser.add_argument("--l2-weight", dest="l2weight",
+                        help="Weight for explicit L2 loss term.",
+                        default=None, type=float)
 
     parser.add_argument("--do",
                         dest="do",
@@ -270,6 +272,11 @@ if __name__ == "__main__":
                         dest="unify",
                         help="Method for unifying the relations.",
                         default='sum', type=str)
+
+    parser.add_argument("--opt",
+                        dest="opt",
+                        help="Optimizer.",
+                        default='adamw', type=str)
 
     parser.add_argument("--conditional", dest="cond",
                         help="Condition on the target node.",
