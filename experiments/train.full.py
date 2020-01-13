@@ -85,6 +85,8 @@ def go(arg):
 
             num_cls = len(cls)
 
+        print(len(train), len(test), len(train) + len(test))
+
         """
         Define model
         """
