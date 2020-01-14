@@ -106,12 +106,12 @@ class RGCNClassic(nn.Module):
             weights = self.weights2
 
         # Apply weights, sum over relations
-        # h = torch.einsum('rhc, rnh -> nc', weights, h) # <- this may be the bug
+        # h = torch.einsum('rhc, rnh -> nc', weights, h)
         h = torch.bmm(h, weights).sum(dim=0)
 
         assert h.size() == (n, c)
 
-        return h + self.bias2 #-- softmax is applied in the loss
+        return F.softmax(h + self.bias2, dim=1) #-- softmax is applied in the loss
 
 class NodeClassifier(nn.Module):
 
