@@ -1,6 +1,7 @@
 import torch
 
 import rdflib as rdf
+from rdflib import URIRef
 import pandas as pd
 import gzip, random, sys, os, wget, pickle, tqdm
 from collections import Counter
@@ -12,7 +13,20 @@ INV  = '.inv'
 
 S = os.sep
 
-def load(name, final=False, limit=None, bidir=False):
+def add_neighbors(set, graph, node, depth=2):
+
+    if depth == 0:
+        return
+
+    for s, p, o in graph.triples((node, None, None)):
+        set.add((s, p, o))
+        add_neighbors(set, graph, o, depth=depth-1)
+
+    for s, p, o in graph.triples((None, None, node)):
+        set.add((s, p, o))
+        add_neighbors(set, graph, s, depth=depth-1)
+
+def load(name, final=False, limit=None, bidir=False, prune=False):
     """
     Loads a knowledge graph dataset. Self connections are automatically added as a special relation
 
@@ -21,11 +35,12 @@ def load(name, final=False, limit=None, bidir=False):
     :param limit: If set, the number of unique relations will be limited to this value, plus one for the self-connections,
                   plus one for the remaining connections combined into a single, new relation.
     :param bidir: Whether to include inverse links for each relation
+    :param prune: Whether to prune edges that are further than two steps from the target labels
     :return: A tuple containing the graph data, and the classification test and train sets:
               - edges: dictionary of edges (relation -> pair of lists cont. subject and object indices respectively)
     """
     # -- Check if the data has been cached for quick loading.
-    cachefile = util.here(f'data{S}{name}{S}cache{"fin" if final else "val"}.pkl')
+    cachefile = util.here(f'data{S}{name}{S}cache_{"fin" if final else "val"}_{"pruned" if prune else "unpruned"}.pkl')
     if os.path.isfile(cachefile) and limit is None:
         print('Using cached data.')
         with open(cachefile, 'rb') as file:
@@ -69,6 +84,30 @@ def load(name, final=False, limit=None, bidir=False):
     else:
         raise Exception(f'Data {name} not recognized')
 
+    # -- Load the classification task
+    labels_train = pd.read_csv(train_file, sep='\t', encoding='utf8')
+    if final:
+        labels_test = pd.read_csv(test_file, sep='\t', encoding='utf8')
+    else:  # split the training data into train and validation
+        ltr = labels_train
+        pivot = int(len(ltr) * VALPROP)
+
+        labels_test = ltr[:pivot]
+        labels_train = ltr[pivot:]
+
+    labels = labels_train[label_header].astype('category').cat.codes
+
+    train = {}
+    for nod, lab in zip(labels_train[nodes_header].values, labels):
+        train[nod] = lab
+    labels = labels_test[label_header].astype('category').cat.codes
+
+    test = {}
+    for nod, lab in zip(labels_test[nodes_header].values, labels):
+        test[nod] = lab
+
+    print('Labels loaded.')
+
     # -- Parse the data with RDFLib
     graph = rdf.Graph()
 
@@ -84,7 +123,18 @@ def load(name, final=False, limit=None, bidir=False):
     nodes = set()
     relations = Counter()
 
-    for s, p, o in graph:
+    if prune:
+        triples = set()
+        for node in list(train.keys()) + list(test.keys()):
+
+            add_neighbors(triples, graph, URIRef(node), depth=2)
+
+    else:
+        triples = graph
+
+
+
+    for s, p, o in triples:
         nodes.add(str(s))
         nodes.add(str(o))
         relations[str(p)] += 1
@@ -108,7 +158,7 @@ def load(name, final=False, limit=None, bidir=False):
 
     # -- Collect all edges into a dictionary: relation -> (from, to)
     #    (only storing integer indices)
-    for s, p, o in tqdm.tqdm(graph):
+    for s, p, o in tqdm.tqdm(triples):
         s, p, o = n2i[str(s)], str(p), n2i[str(o)]
 
         pf = r2i[p] if (p in r2i) else r2i[REST]
@@ -136,30 +186,6 @@ def load(name, final=False, limit=None, bidir=False):
         edges[len(i2r)][1].append(i)
 
     print('Graph loaded.')
-
-    # -- Load the classification task
-    labels_train = pd.read_csv(train_file, sep='\t', encoding='utf8')
-    if final:
-        labels_test = pd.read_csv(test_file, sep='\t', encoding='utf8')
-    else: # split the training data into train and validation
-        ltr = labels_train
-        pivot = int(len(ltr)*VALPROP)
-
-        labels_test = ltr[:pivot]
-        labels_train = ltr[pivot:]
-
-    labels = labels_train[label_header].astype('category').cat.codes
-
-    train = {}
-    for nod, lab in zip(labels_train[nodes_header].values, labels):
-       train[nod] = lab
-    labels = labels_test[label_header].astype('category').cat.codes
-
-    test = {}
-    for nod, lab in zip(labels_test[nodes_header].values, labels):
-       test[nod] = lab
-
-    print('Labels loaded.')
 
     # -- Cache the results for fast loading next time
     if limit is None:

@@ -65,7 +65,7 @@ def go(arg):
 
         else:
             edges, (n2i, i2n), (r2i, i2r), train, test = \
-                kgmodels.load(arg.name, final=arg.final, limit=arg.limit, bidir=True)
+                kgmodels.load(arg.name, final=arg.final, limit=arg.limit, bidir=True, prune=arg.prune)
 
             # Convert test and train to tensors
             train_idx = [n2i[name] for name, _ in train.items()]
@@ -84,8 +84,6 @@ def go(arg):
             N = len(i2n)
 
             num_cls = len(cls)
-
-        print(len(train), len(test), len(train) + len(test))
 
         """
         Define model
@@ -304,6 +302,9 @@ if __name__ == "__main__":
                         help="Disable local feed-forward (activation only).",
                         action="store_true")
 
+    parser.add_argument("--prune", dest="prune",
+                        help="Prune the graph to remove irrelevant links.",
+                        action="store_true")
 
     options = parser.parse_args()
 
