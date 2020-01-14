@@ -84,6 +84,7 @@ def go(arg):
 
     print(f'{len(i2n)} nodes')
     print(f'{len(edges.keys())} relations')
+    print(f'{sum([len(x[0]) for _, x in edges.items()])} edges')
     print(f'{len(train.keys())} training labels')
     print(f'{len(test.keys())} test labels')
 

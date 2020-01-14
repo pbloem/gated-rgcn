@@ -125,7 +125,6 @@ def load(name, final=False, limit=None, bidir=False, prune=False):
     if prune:
         triples = set()
         for node in list(train.keys()) + list(test.keys()):
-
             add_neighbors(triples, graph, URIRef(node), depth=2)
 
     else:
