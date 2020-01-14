@@ -77,9 +77,11 @@ class RGCNClassic(nn.Module):
         n, rn = self.hor_graph.size()
         r = rn // n
         e = self.emb
+        b, c = self.bases, self.numcls
 
         if self.bases1 is not None:
-            weights = torch.einsum('rb, bij -> rij', self.comps1, self.bases1)
+            # weights = torch.einsum('rb, bij -> rij', self.comps1, self.bases1)
+            weights = torch.mm(self.comps1, self.bases1.view(b, n*e)).view(r, n, e)
         else:
             weights = self.weights1
 
@@ -98,14 +100,16 @@ class RGCNClassic(nn.Module):
         h = h.view(r, n, e) # new dim for the relations
 
         if self.bases2 is not None:
-            weights = torch.einsum('rb, bij -> rij', self.comps2, self.bases2)
+            # weights = torch.einsum('rb, bij -> rij', self.comps2, self.bases2)
+            weights = torch.mm(self.comps2, self.bases2.view(b, e * c)).view(r, e, c)
         else:
             weights = self.weights2
 
         # Apply weights, sum over relations
-        h = torch.einsum('rhc, rnh -> nc', weights, h) # <- this may be the bug
+        # h = torch.einsum('rhc, rnh -> nc', weights, h) # <- this may be the bug
+        h = torch.bmm(h, weights).sum(dim=0)
 
-        assert h.size() == (n, self.numcls)
+        assert h.size() == (n, c)
 
         return h + self.bias2 #-- softmax is applied in the loss
 
