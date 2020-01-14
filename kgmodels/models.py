@@ -111,7 +111,7 @@ class RGCNClassic(nn.Module):
 
         assert h.size() == (n, c)
 
-        return F.softmax(h + self.bias2, dim=1) #-- softmax is applied in the loss
+        return h + self.bias2 #-- softmax is applied in the loss
 
 class NodeClassifier(nn.Module):
 
