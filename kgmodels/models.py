@@ -81,8 +81,8 @@ class RGCNClassic(nn.Module):
         b, c = self.bases, self.numcls
 
         if self.bases1 is not None:
-            # weights = torch.einsum('rb, bij -> rij', self.comps1, self.bases1)
-            weights = torch.mm(self.comps1, self.bases1.view(b, n*e)).view(r, n, e)
+            weights = torch.einsum('rb, bij -> rij', self.comps1, self.bases1)
+            # weights = torch.mm(self.comps1, self.bases1.view(b, n*e)).view(r, n, e)
         else:
             weights = self.weights1
 
@@ -101,14 +101,14 @@ class RGCNClassic(nn.Module):
         h = h.view(r, n, e) # new dim for the relations
 
         if self.bases2 is not None:
-            # weights = torch.einsum('rb, bij -> rij', self.comps2, self.bases2)
-            weights = torch.mm(self.comps2, self.bases2.view(b, e * c)).view(r, e, c)
+            weights = torch.einsum('rb, bij -> rij', self.comps2, self.bases2)
+            # weights = torch.mm(self.comps2, self.bases2.view(b, e * c)).view(r, e, c)
         else:
             weights = self.weights2
 
         # Apply weights, sum over relations
-        # h = torch.einsum('rhc, rnh -> nc', weights, h)
-        h = torch.bmm(h, weights).sum(dim=0)
+        h = torch.einsum('rhc, rnh -> nc', weights, h)
+        #h = torch.bmm(h, weights).sum(dim=0)
 
         assert h.size() == (n, c)
 

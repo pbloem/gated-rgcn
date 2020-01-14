@@ -82,6 +82,11 @@ def go(arg):
 
         num_cls = len(cls)
 
+    print(f'{len(i2n)} nodes')
+    print(f'{len(edges.keys())} relations')
+    print(f'{len(train.keys())} training labels')
+    print(f'{len(test.keys())} test labels')
+
     for r in tqdm.trange(repeats) if repeats > 1 else range(repeats):
 
 
