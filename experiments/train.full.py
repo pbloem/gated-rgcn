@@ -89,7 +89,7 @@ def go(arg):
         Define model
         """
         if arg.mixer == 'classic':
-            model = kgmodels.RGCNClassic(edges=edges, n=N, numcls=num_cls, emb=arg.emb, bases=arg.bases)
+            model = kgmodels.RGCNClassic(edges=edges, n=N, numcls=num_cls, emb=arg.emb, bases=arg.bases, softmax=arg.softmax)
         else:
             model = kgmodels.NodeClassifier(edges=edges, n=N, depth=arg.depth, emb=arg.emb, mixer=arg.mixer, numcls=num_cls,
                                         dropout=arg.do, bases=arg.bases, norm_method=arg.norm_method, heads=arg.heads,
@@ -305,6 +305,11 @@ if __name__ == "__main__":
     parser.add_argument("--prune", dest="prune",
                         help="Prune the graph to remove irrelevant links.",
                         action="store_true")
+
+    parser.add_argument("--apply-softmax", dest="softmax",
+                        help="Apply the softmax (apparently twice).",
+                        action="store_true")
+
 
     options = parser.parse_args()
 

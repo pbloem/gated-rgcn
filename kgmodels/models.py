@@ -11,13 +11,14 @@ class RGCNClassic(nn.Module):
     Classic RGCN
     """
 
-    def __init__(self, edges, n, numcls, emb=16, bases=None):
+    def __init__(self, edges, n, numcls, emb=16, bases=None, softmax=False):
 
         super().__init__()
 
         self.emb = emb
         self.bases = bases
         self.numcls = numcls
+        self.softmax = softmax
 
         # horizontally and vertically stacked versions of the adjacency graph
         hor_ind, hor_size = util.adj(edges, n, vertical=False)
@@ -110,6 +111,9 @@ class RGCNClassic(nn.Module):
         h = torch.bmm(h, weights).sum(dim=0)
 
         assert h.size() == (n, c)
+
+        if self.softmax:
+            return F.softmax(h + self.bias2, dim=1)
 
         return h + self.bias2 #-- softmax is applied in the loss
 
