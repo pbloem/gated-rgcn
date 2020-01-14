@@ -64,6 +64,7 @@ def go(arg):
         edges, (n2i, i2n), (r2i, i2r), train, test = \
             kgmodels.load(arg.name, final=arg.final, limit=arg.limit, bidir=True, prune=arg.prune)
 
+
         # Convert test and train to tensors
         train_idx = [n2i[name] for name, _ in train.items()]
         train_lbl = [cls for _, cls in train.items()]
@@ -82,9 +83,13 @@ def go(arg):
 
         num_cls = len(cls)
 
-    print(f'{len(i2n)} nodes')
+    tnodes = len(i2n)
+    totaledges = sum([len(x[0]) for _, x in edges.items()])
+
+    print(f'{tnodes} nodes')
     print(f'{len(edges.keys())} relations')
-    print(f'{sum([len(x[0]) for _, x in edges.items()])} edges')
+    print(f'{totaledges} edges (including self loops and inverse)')
+    print(f'{(totaledges-tnodes)//2} edges (originally)')
     print(f'{len(train.keys())} training labels')
     print(f'{len(test.keys())} test labels')
 

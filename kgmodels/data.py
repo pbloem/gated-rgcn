@@ -13,6 +13,19 @@ INV  = '.inv'
 
 S = os.sep
 
+def st(node):
+    """
+    Maps an rdflib node to a unique string. We use str(node) for URIs (so they can be matched to the classes) and
+    we use .n3() for everything else, so that different nodes don't become unified.
+
+    :param node:
+    :return:
+    """
+    if type(node) == URIRef:
+        return str(node)
+    else:
+        return node.n3()
+
 def add_neighbors(set, graph, node, depth=2):
 
     if depth == 0:
@@ -119,9 +132,6 @@ def load(name, final=False, limit=None, bidir=False, prune=False):
     print('RDF loaded.')
 
     # -- Collect all node and relation labels
-    nodes = set()
-    relations = Counter()
-
     if prune:
         triples = set()
         for node in list(train.keys()) + list(test.keys()):
@@ -130,13 +140,23 @@ def load(name, final=False, limit=None, bidir=False, prune=False):
     else:
         triples = graph
 
+    nodes = set()
+    relations = Counter()
+
     for s, p, o in triples:
-        nodes.add(str(s))
-        nodes.add(str(o))
-        relations[str(p)] += 1
+        nodes.add(st(s))
+        nodes.add(st(o))
+
+        relations[st(p)] += 1
 
         if bidir:
             relations[INV + str(p)] += 1
+
+    #print(len(nodes))
+    # print(len(nodes_uri))
+    # print('\n'.join(list(nodes)[:1000]))
+
+    #sys.exit()
 
     i2n = list(nodes) # maps indices to labels
     n2i = {n:i for i, n in enumerate(i2n)} # maps labels to indices
@@ -155,7 +175,7 @@ def load(name, final=False, limit=None, bidir=False, prune=False):
     # -- Collect all edges into a dictionary: relation -> (from, to)
     #    (only storing integer indices)
     for s, p, o in tqdm.tqdm(triples):
-        s, p, o = n2i[str(s)], str(p), n2i[str(o)]
+        s, p, o = n2i[st(s)], st(p), n2i[st(o)]
 
         pf = r2i[p] if (p in r2i) else r2i[REST]
 
