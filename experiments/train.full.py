@@ -42,48 +42,48 @@ def go(arg):
     train_accs = []
     test_accs = []
 
+    if arg.name == 'random':
+        edges, N, (train_idx, train_lbl), (test_idx, test_lbl) = \
+            kgmodels.random_graph(base=arg.base, bgp0=arg.bgp0, bgp1=arg.bgp1)
+        num_cls = 2
+
+        print(f'Generated random graph with {N} nodes.')
+
+    if arg.name == 'fan':
+
+        edges, N, (train_idx, train_lbl), (test_idx, test_lbl) = \
+            kgmodels.fan(depth=arg.rdepth, diffusion=arg.fdiff, others=1000)
+        num_cls = 2
+
+        # print(f'Generated random graph with {N} nodes.')
+
+        # print(list(zip(* (edges[0]))) )
+        # sys.exit()
+
+    else:
+        edges, (n2i, i2n), (r2i, i2r), train, test = \
+            kgmodels.load(arg.name, final=arg.final, limit=arg.limit, bidir=True, prune=arg.prune)
+
+        # Convert test and train to tensors
+        train_idx = [n2i[name] for name, _ in train.items()]
+        train_lbl = [cls for _, cls in train.items()]
+        train_idx = torch.tensor(train_idx, dtype=torch.long, device=dev)
+        train_lbl = torch.tensor(train_lbl, dtype=torch.long, device=dev)
+
+        test_idx = [n2i[name] for name, _ in test.items()]
+        test_lbl = [cls for _, cls in test.items()]
+        test_idx = torch.tensor(test_idx, dtype=torch.long, device=dev)
+        test_lbl = torch.tensor(test_lbl, dtype=torch.long, device=dev)
+
+        # count nr of classes
+        cls = set([int(l) for l in test_lbl] + [int(l) for l in train_lbl])
+
+        N = len(i2n)
+
+        num_cls = len(cls)
+
     for r in tqdm.trange(repeats) if repeats > 1 else range(repeats):
 
-        if arg.name == 'random':
-
-            edges, N, (train_idx, train_lbl), (test_idx, test_lbl) = \
-                kgmodels.random_graph(base=arg.base, bgp0=arg.bgp0, bgp1=arg.bgp1)
-            num_cls = 2
-
-            print(f'Generated random graph with {N} nodes.')
-
-        if arg.name == 'fan':
-
-            edges, N, (train_idx, train_lbl), (test_idx, test_lbl) = \
-                kgmodels.fan(depth=arg.rdepth, diffusion=arg.fdiff, others=1000)
-            num_cls = 2
-
-            # print(f'Generated random graph with {N} nodes.')
-
-            # print(list(zip(* (edges[0]))) )
-            # sys.exit()
-
-        else:
-            edges, (n2i, i2n), (r2i, i2r), train, test = \
-                kgmodels.load(arg.name, final=arg.final, limit=arg.limit, bidir=True, prune=arg.prune)
-
-            # Convert test and train to tensors
-            train_idx = [n2i[name] for name, _ in train.items()]
-            train_lbl = [cls for _, cls in train.items()]
-            train_idx = torch.tensor(train_idx, dtype=torch.long, device=dev)
-            train_lbl = torch.tensor(train_lbl, dtype=torch.long, device=dev)
-
-            test_idx = [n2i[name] for name, _ in test.items()]
-            test_lbl = [cls for _, cls in test.items()]
-            test_idx = torch.tensor(test_idx, dtype=torch.long, device=dev)
-            test_lbl = torch.tensor(test_lbl, dtype=torch.long, device=dev)
-
-            # count nr of classes
-            cls = set([int(l) for l in test_lbl] + [int(l) for l in train_lbl])
-
-            N = len(i2n)
-
-            num_cls = len(cls)
 
         """
         Define model
