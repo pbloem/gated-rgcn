@@ -96,12 +96,11 @@ def load(name, final=False, limit=None, bidir=False, prune=False):
         labels_train = ltr[pivot:]
 
     labels = labels_train[label_header].astype('category').cat.codes
-
     train = {}
     for nod, lab in zip(labels_train[nodes_header].values, labels):
         train[nod] = lab
-    labels = labels_test[label_header].astype('category').cat.codes
 
+    labels = labels_test[label_header].astype('category').cat.codes
     test = {}
     for nod, lab in zip(labels_test[nodes_header].values, labels):
         test[nod] = lab
@@ -131,8 +130,6 @@ def load(name, final=False, limit=None, bidir=False, prune=False):
 
     else:
         triples = graph
-
-
 
     for s, p, o in triples:
         nodes.add(str(s))
@@ -179,11 +176,11 @@ def load(name, final=False, limit=None, bidir=False, prune=False):
             edges[pi][1].append(s)
 
     # Add self connections explicitly
-    edges[len(i2r)] = [], []
+    edges[len(i2r)] = list(range(len(i2n))), list(range(len(i2n)))
 
-    for i in range(len(i2r)):
-        edges[len(i2r)][0].append(i)
-        edges[len(i2r)][1].append(i)
+    # for i in range(len(i2n)):
+    #     edges[len(i2r)][0].append(i)
+    #     edges[len(i2r)][1].append(i)
 
     print('Graph loaded.')
 
