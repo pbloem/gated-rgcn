@@ -514,8 +514,8 @@ class SimpleRGCN(nn.Module):
         else:
             self.comps = nn.Parameter(torch.FloatTensor(r, bases))
             self.bases = nn.Parameter(torch.FloatTensor(bases, emb, emb))
-            nn.init.xavier_uniform_(self.weights, gain=nn.init.calculate_gain('relu'))
-            nn.init.xavier_uniform_(self.weights, gain=nn.init.calculate_gain('relu'))
+            nn.init.xavier_uniform_(self.comps, gain=nn.init.calculate_gain('relu'))
+            nn.init.xavier_uniform_(self.bases, gain=nn.init.calculate_gain('relu'))
 
         self.dropout = None if dropout is None else nn.Dropout(dropout)
 
