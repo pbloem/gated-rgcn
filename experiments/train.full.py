@@ -34,6 +34,7 @@ def prt(str, end='\n'):
         print(str, end=end)
 
 def go(arg):
+
     global repeats
     repeats = arg.repeats
 
@@ -82,6 +83,9 @@ def go(arg):
         N = len(i2n)
 
         num_cls = len(cls)
+
+
+    print('some test set ids and labels', test_idx[:10], test_lbl[:10])
 
     tnodes = len(i2n)
     totaledges = sum([len(x[0]) for _, x in edges.items()])
