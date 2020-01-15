@@ -93,8 +93,6 @@ class GCN(nn.Module):
             nn.init.xavier_uniform_(self.comps, gain=nn.init.calculate_gain('relu'))
             nn.init.xavier_uniform_(self.bases, gain=nn.init.calculate_gain('relu'))
 
-        self.bias = nn.Parameter(torch.FloatTensor(emb).zero_())
-
         if unify == 'sum':
             self.unify = SumUnify()
         elif unify == 'attention':
@@ -130,7 +128,7 @@ class GCN(nn.Module):
         # Apply weights
         h = torch.einsum('rih, rnh -> nri', weights, h)
 
-        return self.unify(h) + self.bias
+        return self.unify(h)
 
 class GCNFirst(nn.Module):
     """
@@ -172,8 +170,6 @@ class GCNFirst(nn.Module):
             self.bases = nn.Parameter(torch.FloatTensor(bases, n, emb))
             nn.init.xavier_uniform_(self.bases, gain=nn.init.calculate_gain('relu'))
 
-        self.bias = nn.Parameter(torch.FloatTensor(emb).zero_())
-
     def forward(self, x=None, conditional=None):
         """
         :param x: E by N matrix of node embeddings.
@@ -197,7 +193,7 @@ class GCNFirst(nn.Module):
         h = torch.mm(self.graph, weights.view(r*n, e))
         assert h.size() == (n, e)
 
-        return h + self.bias
+        return h
 
 class GAT(nn.Module):
     """
