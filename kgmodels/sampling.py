@@ -495,7 +495,7 @@ class Sample(nn.Module):
 
 class SimpleRGCN(nn.Module):
     """
-    Basic RGCN on subgraphs. Ignores global attention, and performs simple message passing
+    Basic RGCN on subgraphs.
     """
 
     def __init__(self, graph, r, emb, bases=None, dropout=None, use_global_weights=False, tokeys=None, toqueries=None, relations=None, **kwargs):
@@ -504,11 +504,15 @@ class SimpleRGCN(nn.Module):
         self.r, self.emb = r, emb
 
         if bases is None:
-            self.weights = nn.Parameter(torch.FloatTensor(r, emb, emb).uniform_(-1/sqrt(emb), 1/sqrt(emb)) )
+            self.weights = nn.Parameter(torch.FloatTensor(r, emb, emb) )
             self.bases = None
+            nn.init.xavier_uniform_(self.weights, gain=nn.init.calculate_gain('relu'))
+
         else:
-            self.comps = nn.Parameter(torch.FloatTensor(r, bases).uniform_(-1/sqrt(bases), 1/sqrt(bases)) )
-            self.bases = nn.Parameter(torch.FloatTensor(bases, emb, emb).uniform_(-1/sqrt(emb), 1/sqrt(emb)) )
+            self.comps = nn.Parameter(torch.FloatTensor(r, bases))
+            self.bases = nn.Parameter(torch.FloatTensor(bases, emb, emb))
+            nn.init.xavier_uniform_(self.weights, gain=nn.init.calculate_gain('relu'))
+            nn.init.xavier_uniform_(self.weights, gain=nn.init.calculate_gain('relu'))
 
         self.dropout = None if dropout is None else nn.Dropout(dropout)
 
@@ -516,7 +520,6 @@ class SimpleRGCN(nn.Module):
         self.tokeys = tokeys
         self.toqueries = toqueries
         self.relations = relations
-
 
     def forward(self, batch, globals):
 

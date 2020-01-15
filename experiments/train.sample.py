@@ -95,8 +95,8 @@ def go(arg):
         train_idx, test_idx = [n.item() for n in train_idx], [n.item() for n in test_idx]
 
         model = kgmodels.SamplingClassifier(graph=edges, n=N, depth=arg.depth, emb=arg.emb, ksample=arg.ksample,
-                num_cls=num_cls, boost=arg.boost, bases=arg.bases, maskid=arg.maskid, dropout=arg.do, forward_mp=arg.forward_mp,
-                csample=arg.csample, incdo=arg.incdo)
+                num_cls=num_cls, boost=arg.boost, bases=arg.bases, maskid=arg.maskid, dropout=arg.do,
+                forward_mp=arg.forward_mp, csample=arg.csample, incdo=arg.incdo, use_global_weights=not arg.ignore_globals)
 
         if torch.cuda.is_available():
             prt('Using CUDA.')
@@ -377,6 +377,10 @@ if __name__ == "__main__":
                         dest="seed",
                         help="RNG seed. Negative for random",
                         default=-1, type=int)
+
+    parser.add_argument("--ignore-globals", dest="ignore_globals",
+                        help="Ignore the global attention weights.",
+                        action="store_true")
 
     options = parser.parse_args()
 

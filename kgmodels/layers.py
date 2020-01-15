@@ -165,10 +165,10 @@ class GCNFirst(nn.Module):
             self.bases = None
         else:
             self.comps = nn.Parameter(torch.FloatTensor(r, bases) )
-            nn.init.xavier_uniform_(self.comps, gain=nn.init.calculate_gain('relu'))
+            nn.init.xavier_uniform_(self.weights, gain=nn.init.calculate_gain('relu'))
 
             self.bases = nn.Parameter(torch.FloatTensor(bases, n, emb))
-            nn.init.xavier_uniform_(self.bases, gain=nn.init.calculate_gain('relu'))
+            nn.init.xavier_uniform_(self.weights, gain=nn.init.calculate_gain('relu'))
 
     def forward(self, x=None, conditional=None):
         """
