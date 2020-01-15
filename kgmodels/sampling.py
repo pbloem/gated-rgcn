@@ -270,12 +270,14 @@ class SamplingClassifier(nn.Module):
 
         for d in range(depth):
             if forward_mp and d != 0:
-                layers.append(SimpleRGCN(self.graph, self.r, emb, bases=bases, dropout=dropout, **kwargs))
+                layers.append(SimpleRGCN(self.graph, self.r, emb, bases=bases, dropout=dropout, nodes=self.embeddings,
+                                         tokeys=self.tokeys, toqueries=self.toqueries, relations=self.relations,  **kwargs))
 
             layers.append(Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
                                  toqueries=self.toqueries, ksample=ksample, boost=boost, csample=csample, **kwargs))
 
-        layers += [SimpleRGCN(self.graph, self.r, emb, bases=bases, dropout=dropout) for _ in range(depth)]
+        layers += [SimpleRGCN(self.graph, self.r, emb, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
+                                 toqueries=self.toqueries, bases=bases, dropout=dropout, **kwargs) for _ in range(depth)]
 
         self.layers = nn.ModuleList(modules=layers)
 
@@ -498,10 +500,11 @@ class SimpleRGCN(nn.Module):
     Basic RGCN on subgraphs.
     """
 
-    def __init__(self, graph, r, emb, bases=None, dropout=None, use_global_weights=False, tokeys=None, toqueries=None, relations=None, **kwargs):
+    def __init__(self, graph, r, emb, nodes, bases=None, dropout=None, use_global_weights=False, tokeys=None, toqueries=None, relations=None, **kwargs):
         super().__init__()
 
         self.r, self.emb = r, emb
+        self.nodes = nodes # base embeddings
 
         if bases is None:
             self.weights = nn.Parameter(torch.FloatTensor(r, emb, emb) )
@@ -537,10 +540,13 @@ class SimpleRGCN(nn.Module):
             # recompute the global weights
             # -- these ones get gradients, so it's more efficient to recompute the small subset that
             #    requires gradients.
+
+            embeddings = torch.cat([batch.embeddings(), self.nodes], dim=0)  # probably expensive
+
             si, pi, oi = [s for s, _, _ in cflat], [p for _, p, _ in cflat], [o for _, _, o in cflat]
             si, oi = batch.batch_indices(si), batch.batch_indices(oi)
 
-            semb, pemb, oemb, = batch.embeddings[si, :], self.relations[pi, :], batch.embeddings[oi, :]
+            semb, pemb, oemb = embeddings[si, :], self.relations[pi, :], embeddings[oi, :]
 
             # compute the score (bilinear dot product)
             semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
