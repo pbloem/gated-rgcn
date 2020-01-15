@@ -83,14 +83,17 @@ class GCN(nn.Module):
 
 
         if bases is None:
-            lim = sqrt(6 / (emb + emb))
-            self.weights = nn.Parameter(torch.FloatTensor(r, emb, emb).uniform_(-lim, lim) )
+            self.weights = nn.Parameter(torch.FloatTensor(r, emb, emb))
+            nn.init.xavier_uniform_(self.weights, gain=nn.init.calculate_gain('relu'))
+
             self.bases = None
         else:
-            lim = sqrt(6 / (r + bases))
-            self.comps = nn.Parameter(torch.FloatTensor(r, bases).uniform_(-lim, lim) )
-            lim = sqrt(6 / (emb + emb))
-            self.bases = nn.Parameter(torch.FloatTensor(bases, emb, emb).uniform_(-lim, lim) )
+            self.comps = nn.Parameter(torch.FloatTensor(r, bases))
+            self.bases = nn.Parameter(torch.FloatTensor(bases, emb, emb))
+            nn.init.xavier_uniform_(self.comps, gain=nn.init.calculate_gain('relu'))
+            nn.init.xavier_uniform_(self.bases, gain=nn.init.calculate_gain('relu'))
+
+        self.bias = nn.Parameter(torch.FloatTensor(emb).zero_())
 
         if unify == 'sum':
             self.unify = SumUnify()
@@ -127,7 +130,7 @@ class GCN(nn.Module):
         # Apply weights
         h = torch.einsum('rih, rnh -> nri', weights, h)
 
-        return self.unify(h)
+        return self.unify(h) + self.bias
 
 class GCNFirst(nn.Module):
     """
@@ -141,28 +144,35 @@ class GCNFirst(nn.Module):
 
         self.emb = emb
 
+        # vertical stack to find the normalization
+        vindices, vsize = util.adj(edges, n, vertical=False)
+        ih, iw = vindices.size()
+
+        vals = torch.ones((ih, ), dtype=torch.float)
+        vals = vals / util.sum_sparse(vindices, vals, vsize)
+
+        # horizontal stack for the actual message passing
         indices, size = util.adj(edges, n, vertical=False)
 
         _, rn = size
         r = rn//n
 
-        ih, iw = indices.size()
-        vals = torch.ones((ih, ), dtype=torch.float)
-
-        vals = vals / util.sum_sparse(indices, vals, size)
-
         graph = torch.sparse.FloatTensor(indices=indices.t(), values=vals, size=size) # will this get cuda'd properly?
         self.register_buffer('graph', graph)
 
         if bases is None:
-            lim = sqrt(6 / (n + emb))
-            self.weights = nn.Parameter(torch.FloatTensor(r, n, emb).uniform_(-lim, lim) )
+            self.weights = nn.Parameter(torch.FloatTensor(r, n, emb))
+            nn.init.xavier_uniform_(self.weights, gain=nn.init.calculate_gain('relu'))
+
             self.bases = None
         else:
-            lim = sqrt(6 / (r + bases))
-            self.comps = nn.Parameter(torch.FloatTensor(r, bases).uniform_(-lim, lim) )
-            lim = sqrt(6 / (n + emb))
-            self.bases = nn.Parameter(torch.FloatTensor(bases, n, emb).uniform_(-lim, lim) )
+            self.comps = nn.Parameter(torch.FloatTensor(r, bases) )
+            nn.init.xavier_uniform_(self.comps, gain=nn.init.calculate_gain('relu'))
+
+            self.bases = nn.Parameter(torch.FloatTensor(bases, n, emb))
+            nn.init.xavier_uniform_(self.bases, gain=nn.init.calculate_gain('relu'))
+
+        self.bias = nn.Parameter(torch.FloatTensor(emb).zero_())
 
     def forward(self, x=None, conditional=None):
         """
@@ -185,10 +195,9 @@ class GCNFirst(nn.Module):
 
         # Apply weights and sum over relations
         h = torch.mm(self.graph, weights.view(r*n, e))
-
         assert h.size() == (n, e)
 
-        return h
+        return h + self.bias
 
 class GAT(nn.Module):
     """
