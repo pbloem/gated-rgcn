@@ -240,7 +240,7 @@ def sum_sparse(indices, values, size, row=True):
     results back to the non-sparse row/column entries
 
     Arguments are interpreted as defining sparse matrix. Any extra dimensions
-    as treated as batch.
+    are treated as batch.
 
     :return:
     """
@@ -264,15 +264,18 @@ def sum_sparse(indices, values, size, row=True):
 
     b, k, r = indices.size()
 
-    if row:
-        ones = torch.ones((size[1], 1), device=d(indices))
-    else:
-        ones = torch.ones((size[0], 1), device=d(indices))
+    if not row:
         # transpose the matrix
-        indices = torch.cat([indices[:, :, 1:2], indices[:, :, 0:1]], dim=1)
+        indices = torch.cat([indices[:, :, 1:2], indices[:, :, 0:1]], dim=2)
+        size = size[1], size[0]
+
+    ones = torch.ones((size[1], 1), device=d(indices))
 
     s, _ = ones.size()
     ones = ones[None, :, :].expand(b, s, 1).contiguous()
+
+    # print(indices.size(), values.size(), size, ones.size())
+    # sys.exit()
 
     sums = batchmm(indices, values, size, ones) # row/column sums
     bindex = torch.arange(b, device=d(indices))[:, None].expand(b, indices.size(1))

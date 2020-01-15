@@ -27,16 +27,17 @@ class RGCNClassic(nn.Module):
         _, rn = hor_size
         r = rn//n
 
-        hor_vals = torch.ones(hor_ind.size(0), dtype=torch.float)
-        hor_vals = hor_vals / util.sum_sparse(hor_ind, hor_vals, hor_size)
+        t = len(edges[0][0])
 
-        hor_graph = torch.sparse.FloatTensor(indices=hor_ind.t(), values=hor_vals, size=hor_size)
+        vals = torch.ones(ver_ind.size(0), dtype=torch.float)
+        vals = vals / util.sum_sparse(ver_ind, vals, ver_size)
+        # -- the values are the same for the horizontal and the vertically stacked adjacency matrices
+        #    so we can just normalize them by the vertically stacked one and reuse for the horizontal
+
+        hor_graph = torch.sparse.FloatTensor(indices=hor_ind.t(), values=vals, size=hor_size)
         self.register_buffer('hor_graph', hor_graph)
 
-        ver_vals = torch.ones(ver_ind.size(0), dtype=torch.float)
-        ver_vals = ver_vals / util.sum_sparse(ver_ind, ver_vals, ver_size)
-
-        ver_graph = torch.sparse.FloatTensor(indices=ver_ind.t(), values=ver_vals, size=ver_size)
+        ver_graph = torch.sparse.FloatTensor(indices=ver_ind.t(), values=vals, size=ver_size)
         self.register_buffer('ver_graph', ver_graph)
 
         # layer 1 weights
