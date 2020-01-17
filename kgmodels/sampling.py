@@ -557,7 +557,7 @@ class SimpleRGCN(nn.Module):
 
             dots = (semb * pemb * oemb).sum(dim=1) / e
 
-            values = F.softplus(dots)
+            values = dots.exp() # F.softplus(dots)
         else:
             values = torch.ones((indices.size(0), ), device=d(), dtype=torch.float)
 
