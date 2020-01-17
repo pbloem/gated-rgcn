@@ -56,6 +56,7 @@ def heapselect(generator, keyfunc, k):
 
 def wrs_gen(elem, k, weight_function):
     """
+    Weighted reservoir sampling over the given generator
 
     :param elem: Generator over the elments
     :param k: Number of elements to sample
@@ -452,7 +453,9 @@ class Sample(nn.Module):
 
                     # WRS with a full sort (optimize later)
                     u = torch.rand(*dots.size(), device=d(dots))
-                    weights = dots / u.exp()
+                    weights = u.log() / dots.exp()
+
+                    # print(f'{weights.mean().item():.04}, {weights.std().item():.04}' ,weights[:10])
 
                     weights, indices = torch.sort(weights, descending=True)
                     indices = indices[:self.ksample]
