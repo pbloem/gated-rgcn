@@ -4,5 +4,5 @@ from .layers import GAT, GCN
 
 from .data import load, random_graph, fan
 
-from .sampling import SamplingClassifier
+from .sampling import SamplingClassifier, Batch, convert
 
