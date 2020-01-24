@@ -260,6 +260,7 @@ def rint(n):
 def fan(train=1000, test=1000, others=1000, depth=3, diffusion=5):
     """
     Creates a random classification problem with a "fan" structure
+
     :param train:
     :param test:
     :param others:

@@ -255,7 +255,7 @@ class Batch():
 
     def to_data_node(self, batch_node):
 
-        return self.to_ind[batch_node]
+        return self.toind[batch_node][1]
 
     def to_data_edge(self, edge):
         """
@@ -263,6 +263,9 @@ class Batch():
         :param edge:
         :return:
         """
+        if type(edge) == torch.Tensor:
+            assert edge.size() == (3, )
+            edge = (edge[0].item(), edge[1].item(), edge[2].item())
 
         s, p, o = edge
         return self.to_data_node(s), p, self.to_data_node(o)
@@ -301,7 +304,7 @@ class Batch():
 
 class SamplingClassifier(nn.Module):
 
-    def __init__(self, graph, n, num_cls, depth=2, emb=16, ksample=50, boost=0, bases=None, dropout=None, forward_mp=False, csample=None, **kwargs):
+    def __init__(self, graph, n, num_cls, depth=2, emb=16, ksample=50, boost=0, bases=None, dropout=None, forward_mp=False, csample=None, indep=False,  **kwargs):
         super().__init__()
 
         self.r, self.n, self.ksample = len(graph.keys()), n, ksample
@@ -317,6 +320,13 @@ class SamplingClassifier(nn.Module):
         self.tokeys = nn.Parameter(torch.randn(emb, emb).uniform_(-1/sqrt(emb), 1/sqrt(emb)))
         self.toqueries = nn.Parameter(torch.randn(emb, emb).uniform_(-1/sqrt(emb), 1/sqrt(emb)))
 
+        self.indep = indep
+        if indep:
+            self.e2i = {edge : i for i, edge in enumerate(self.edges)}
+
+            m = len(self.edges)
+            self.edgeweights = nn.Parameter(torch.randn(m))
+
         layers = []
 
         for d in range(depth):
@@ -325,14 +335,23 @@ class SamplingClassifier(nn.Module):
                                          tokeys=self.tokeys, toqueries=self.toqueries, relations=self.relations,  **kwargs))
 
             layers.append(Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
-                                 toqueries=self.toqueries, ksample=ksample, boost=boost, csample=csample, **kwargs))
+                                 toqueries=self.toqueries, ksample=ksample, boost=boost, csample=csample,
+                                 indep=(self.edgeweights, self.e2i) if indep else None,
+                                **kwargs))
 
-        layers += [SimpleRGCN(self.graph, self.r, emb, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
-                                 toqueries=self.toqueries, bases=bases, dropout=dropout, **kwargs) for _ in range(depth)]
+        for _ in range(depth):
+            layers += [SimpleRGCN(self.graph, self.r, emb, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
+                                 toqueries=self.toqueries, bases=bases, dropout=dropout,
+                                 indep=(self.edgeweights, self.e2i) if indep else None,
+                                  **kwargs),
+                       FF(emb=emb)
+                   ]
 
         self.layers = nn.ModuleList(modules=layers)
 
         self.cls = nn.Linear(emb, num_cls)
+
+        self.indep = indep
 
     def set(self, parm, value):
 
@@ -381,7 +400,7 @@ class SamplingClassifier(nn.Module):
         for i, layer in enumerate(self.layers):
             batch = layer(batch, self.globals)
 
-        pooled = batch.embeddings()[:b, :]
+        pooled = batch.embeddings()[:b, :] # !!
         c = self.cls(pooled) # (b, num_cls)
 
         return c
@@ -434,6 +453,22 @@ class SamplingClassifier(nn.Module):
 #
 #         return batch
 
+class FF(nn.Module):
+    """
+    Simple feedwordard module with relu activation (one layer)
+    """
+
+    def __init__(self, emb=16):
+        super().__init__()
+
+        self.lin = nn.Linear(emb, emb)
+
+    def forward(self, batch : Batch, globals=None):
+
+        batch.node_emb = F.relu(self.lin(batch.node_emb))
+
+        return batch
+
 class Sample(nn.Module):
     """
     Extends a subgraph batch by computing global self attention scores and sampling according to their magnitude.
@@ -441,7 +476,7 @@ class Sample(nn.Module):
     Samples a _fixed_ number of extra edges (if enough incident edges are available)
     """
 
-    def __init__(self, graph, nodes=None, relations=None, tokeys=None, toqueries=None, ksample=50, csample=None,  **kwargs):
+    def __init__(self, graph, nodes=None, relations=None, tokeys=None, toqueries=None, ksample=50, csample=None, indep=None, **kwargs):
         super().__init__()
 
         self.graph = graph
@@ -455,6 +490,12 @@ class Sample(nn.Module):
 
         self.csample = csample
 
+        self.indep  = False
+        if indep is not None:
+            self.attn, self.e2i = indep
+            self.indep = True
+
+
     def forward(self, batch : Batch, globals):
         """
 
@@ -466,27 +507,34 @@ class Sample(nn.Module):
         b = batch.size()
         n, e = batch.embeddings().size()
 
-        with torch.no_grad():
+        for bi in range(b):
 
-            for bi in range(b):
+            # candidates = batch.inc_edges(bi)
+            # cflat = list(candidates)
 
-                # candidates = batch.inc_edges(bi)
-                # cflat = list(candidates)
+            tic()
+            if self.training and self.csample is not None:
+                # Sample a list of candidates using the pre-computed scores
 
-                tic()
-                if self.training and self.csample is not None:
-                    # Sample a list of candidates using the pre-computed scores
+                # cflat = heapselect(generator=batch.gen_inc_edges(bi, do=self.incdo), keyfunc=lambda edge : - globals[edge], k=self.csample)
+                cflat = wrs_gen(batch.gen_inc_edges(bi),
+                                weight_function=lambda edge : globals[edge],
+                                k=self.csample)
+            else:
+                cflat = list(batch.gen_inc_edges(bi))
 
-                    # cflat = heapselect(generator=batch.gen_inc_edges(bi, do=self.incdo), keyfunc=lambda edge : - globals[edge], k=self.csample)
-                    cflat = wrs_gen(batch.gen_inc_edges(bi),
-                                    weight_function=lambda edge : globals[edge],
-                                    k=self.csample)
+            if self.training:
+
+                if self.indep:
+
+                    edge_indices = [self.e2i[edge] for edge in cflat]
+                    dots = self.attn[edge_indices]
+
+                    cflat = torch.tensor(cflat)
+
                 else:
-                    cflat = list(batch.gen_inc_edges(bi))
 
-                cflat = torch.tensor(cflat)
-
-                if self.training:
+                    cflat = torch.tensor(cflat)
 
                     # Reduce the candidates further by reservoir sampling with the actual weights
                     embeddings = self.nodes # raw embeddings (not batch embeddings)
@@ -504,22 +552,26 @@ class Sample(nn.Module):
 
                     dots = (semb * pemb * oemb).sum(dim=1) / e
 
-                    # WRS with a full sort (optimize later)
-                    u = torch.rand(*dots.size(), device=d(dots))
-                    weights = u.log() / dots.exp()
+                # WRS with a full sort (optimize later)
+                u = torch.rand(*dots.size(), device=d(dots))
+                weights = u.log() / dots.exp()
 
-                    # print(f'{weights.mean().item():.04}, {weights.std().item():.04}' ,weights[:10])
+                if bi == 0 and random.random() < 0.0:
+                    print(batch.entities[bi])
+                    print(cflat)
+                    print(f'{weights.mean().item():.04}, {weights.std().item():.04}' ,weights[:10])
 
-                    weights, indices = torch.sort(weights, descending=True)
-                    indices = indices[:self.ksample]
+                weights, indices = torch.sort(weights, descending=True)
+                indices = indices[:self.ksample]
 
-                    cand_sampled = cflat[indices, :]
-                    cand_sampled = [(s.item(), p.item(), o.item()) for s, p, o in cand_sampled]
+                cand_sampled = cflat[indices, :]
+                cand_sampled = [(s.item(), p.item(), o.item()) for s, p, o in cand_sampled]
 
-                else:
-                    cand_sampled = cflat
+            else:
+                cflat = torch.tensor(cflat)
+                cand_sampled = cflat
 
-                batch.add_edges(cand_sampled, bi)
+            batch.add_edges(cand_sampled, bi)
 
         return batch
 
@@ -529,7 +581,7 @@ class SimpleRGCN(nn.Module):
 
     """
 
-    def __init__(self, graph, r, emb, nodes, bases=None, dropout=None, use_global_weights=False, tokeys=None, toqueries=None, relations=None, **kwargs):
+    def __init__(self, graph, r, emb, nodes, bases=None, dropout=None, use_global_weights=False, tokeys=None, toqueries=None, relations=None, indep=None, **kwargs):
         super().__init__()
 
         self.r, self.emb = r, emb
@@ -553,6 +605,11 @@ class SimpleRGCN(nn.Module):
         self.toqueries = toqueries
         self.relations = relations
 
+        self.indep  = False
+        if indep is not None:
+            self.attn, self.e2i = indep
+            self.indep = True
+
     def forward(self, batch, globals):
 
         n, r, e = batch.num_nodes(), self.r, self.emb
@@ -566,31 +623,38 @@ class SimpleRGCN(nn.Module):
 
         # row normalize
         if self.use_global_weights:
-            # use weighted message passing
 
-            # recompute the global weights
-            # -- these ones get gradients, so it's more efficient to recompute the small subset that
-            #    requires gradients.
+            if self.indep:
+                edge_indices = [self.e2i[batch.to_data_edge(edge)] for edge in cflat]
 
-            embeddings = batch.embeddings()
+                dots = self.attn[edge_indices]
 
-            #si, pi, oi = [s for s, _, _ in cflat], [p for _, p, _ in cflat], [o for _, _, o in cflat]
+            else:
+                # use weighted message passing
 
-            si, pi, oi = cflat[:, 0], cflat[:, 1], cflat[:, 0]
+                # recompute the global weights
+                # -- these ones get gradients, so it's more efficient to recompute the small subset that
+                #    requires gradients.
 
-            try:
-                semb, pemb, oemb = embeddings[si, :], self.relations[pi, :], embeddings[oi, :]
-            except Exception as e:
-                print(si.max(), pi.max(), oi.max())
-                print(embeddings.size())
+                embeddings = batch.embeddings()
 
-                raise e
+                #si, pi, oi = [s for s, _, _ in cflat], [p for _, p, _ in cflat], [o for _, _, o in cflat]
 
-            # compute the score (bilinear dot product)
-            semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
-            oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
+                si, pi, oi = cflat[:, 0], cflat[:, 1], cflat[:, 0]
 
-            dots = (semb * pemb * oemb).sum(dim=1) / e
+                try:
+                    semb, pemb, oemb = embeddings[si, :], self.relations[pi, :], embeddings[oi, :]
+                except Exception as e:
+                    print(si.max(), pi.max(), oi.max())
+                    print(embeddings.size())
+
+                    raise e
+
+                # compute the score (bilinear dot product)
+                semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
+                oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
+
+                dots = (semb * pemb * oemb).sum(dim=1) / e
 
             values = dots.exp() # F.softplus(dots)
         else:
@@ -598,8 +662,22 @@ class SimpleRGCN(nn.Module):
 
         values = values / util.sum_sparse(indices, values, (r * n, n))
 
+        # values.retain_grad()
+        # self.values = values
+        # self.register_backward_hook(lambda gin, gout: print(values.grad))
+
         # perform message passing
         output = util.spmm(indices, values, (n * r, n), batch.embeddings())
+
+        if random.random() < 0.01:
+            # print(semb.mean(dim=1), pemb.mean(dim=1), oemb.mean(dim=1))
+            # print((semb * pemb * oemb).sum(dim=1) / e)
+            # print(((semb * pemb * oemb).sum(dim=1) / e).exp())
+            #
+
+            print(dots)
+            print(dots.exp())
+            # print(torch.sparse.FloatTensor(indices.t(), values, (n * r, n)).to_dense())
 
         assert output.size() == (r * n, e), f'{output.size()} {(r * n, e)}'
 

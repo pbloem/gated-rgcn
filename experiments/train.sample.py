@@ -63,7 +63,7 @@ def go(arg):
         if arg.name == 'fan':
 
             edges, N, (train_idx, train_lbl), (test_idx, test_lbl) = \
-                kgmodels.fan(depth=arg.rdepth, diffusion=arg.fdiff, others=1000)
+                kgmodels.fan(depth=arg.rdepth, diffusion=arg.fdiff, others=1000, train=100, test=100)
             num_cls = 2
 
         else:
@@ -96,7 +96,8 @@ def go(arg):
 
         model = kgmodels.SamplingClassifier(graph=edges, n=N, depth=arg.depth, emb=arg.emb, ksample=arg.ksample,
                 num_cls=num_cls, boost=arg.boost, bases=arg.bases, maskid=arg.maskid, dropout=arg.do,
-                forward_mp=arg.forward_mp, csample=arg.csample, incdo=arg.incdo, use_global_weights=not arg.ignore_globals)
+                forward_mp=arg.forward_mp, csample=arg.csample, incdo=arg.incdo, use_global_weights=not arg.ignore_globals,
+                indep=arg.independent_weights)
 
         if torch.cuda.is_available():
             prt('Using CUDA.')
@@ -380,6 +381,10 @@ if __name__ == "__main__":
 
     parser.add_argument("--ignore-globals", dest="ignore_globals",
                         help="Ignore the global attention weights.",
+                        action="store_true")
+
+    parser.add_argument("--independent-weights", dest="independent_weights",
+                        help="Learn global weights independent from node embeddings.",
                         action="store_true")
 
     options = parser.parse_args()
