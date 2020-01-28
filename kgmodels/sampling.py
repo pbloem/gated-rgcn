@@ -31,6 +31,8 @@ TODO:
 
 """
 
+ACTIVATION = F.softplus
+
 def heapselect(generator, keyfunc, k):
     """
     Selects the k smallest elements from the generator
@@ -555,7 +557,8 @@ class Sample(nn.Module):
                 # WRS with a full sort (optimize later)
                 u = torch.rand(*dots.size(), device=d(dots))
                 # weights = u.log() / dots.exp()
-                weights = u.log() * ((-dots).exp() + 1)
+                # weights = u.log() * ((-dots).exp() + 1)
+                weights = u.log() / ACTIVATION(dots)
 
                 if bi == 0 and random.random() < 0.0:
                     print(batch.entities[bi])
@@ -661,7 +664,7 @@ class SimpleRGCN(nn.Module):
             values = torch.ones((indices.size(0), ), device=d(), dtype=torch.float)
             values = values / util.sum_sparse(indices, values, (r * n, n))
 
-            values *= F.sigmoid(dots) # F.softplus(dots)
+            values *= ACTIVATION(dots) # F.softplus(dots)
         else:
             values = torch.ones((indices.size(0), ), device=d(), dtype=torch.float)
             values = values / util.sum_sparse(indices, values, (r * n, n))
@@ -680,7 +683,7 @@ class SimpleRGCN(nn.Module):
             #
 
             print(dots)
-            print(dots.exp())
+            print(ACTIVATION(dots))
             # print(torch.sparse.FloatTensor(indices.t(), values, (n * r, n)).to_dense())
 
         assert output.size() == (r * n, e), f'{output.size()} {(r * n, e)}'
