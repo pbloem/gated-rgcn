@@ -2,9 +2,13 @@ import torch, os, sys
 
 from torch import nn
 import torch.nn.functional as F
-from math import sqrt
+from math import sqrt, ceil
 
 import layers, util
+
+import matplotlib as mpl
+mpl.use('Agg')
+import matplotlib.pyplot as plt
 
 class RGCNClassic(nn.Module):
     """
@@ -39,6 +43,18 @@ class RGCNClassic(nn.Module):
 
         ver_graph = torch.sparse.FloatTensor(indices=ver_ind.t(), values=vals, size=ver_size)
         self.register_buffer('ver_graph', ver_graph)
+
+        # res = torch.mm(torch.sparse.FloatTensor(indices=ver_ind.t(), values=torch.ones(ver_ind.size(0), dtype=torch.float), size=ver_size), torch.ones((n, 1), dtype=torch.float))
+        # print('.')
+        # res = res.data.numpy()
+        # n, bins, _ = plt.hist(res, bins =range(25) )
+        # print(bins)
+        # print(n)
+        # plt.yscale('log', nonposy='clip')
+        # plt.savefig('hist.png')
+        # print('.')
+        #
+        # sys.exit()
 
         # layer 1 weights
         if bases is None:

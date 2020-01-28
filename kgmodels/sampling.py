@@ -554,7 +554,8 @@ class Sample(nn.Module):
 
                 # WRS with a full sort (optimize later)
                 u = torch.rand(*dots.size(), device=d(dots))
-                weights = u.log() / dots.exp()
+                # weights = u.log() / dots.exp()
+                weights = u.log() * ((-dots).exp() + 1)
 
                 if bi == 0 and random.random() < 0.0:
                     print(batch.entities[bi])
@@ -656,11 +657,14 @@ class SimpleRGCN(nn.Module):
 
                 dots = (semb * pemb * oemb).sum(dim=1) / e
 
-            values = dots.exp() # F.softplus(dots)
+
+            values = torch.ones((indices.size(0), ), device=d(), dtype=torch.float)
+            values = values / util.sum_sparse(indices, values, (r * n, n))
+
+            values *= F.sigmoid(dots) # F.softplus(dots)
         else:
             values = torch.ones((indices.size(0), ), device=d(), dtype=torch.float)
-
-        values = values / util.sum_sparse(indices, values, (r * n, n))
+            values = values / util.sum_sparse(indices, values, (r * n, n))
 
         # values.retain_grad()
         # self.values = values
