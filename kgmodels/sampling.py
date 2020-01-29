@@ -259,6 +259,14 @@ class Batch():
 
         return self.toind[batch_node][1]
 
+    def to_data_nodes(self, batch_nodes):
+
+        dnodes = [self.to_data_node(node) for node in batch_nodes]
+
+        if isinstance(batch_nodes, torch.Tensor):
+            return torch.tensor(dnodes, dtype=torch.long, device=d(batch_nodes))
+        return dnodes
+
     def to_data_edge(self, edge):
         """
         Map an edge in the batch graph to the corresponding edge in the
@@ -545,6 +553,7 @@ class Sample(nn.Module):
                 else:
 
                     cflat = torch.tensor(cflat)
+                    # NOTE: Raw indices here
 
                     # Reduce the candidates further by reservoir sampling with the actual weights
                     embeddings = self.nodes # raw embeddings (not batch embeddings)
@@ -579,7 +588,11 @@ class Sample(nn.Module):
                 indices = indices[:self.ksample]
 
                 cand_sampled = cflat[indices, :]
+                if random.random() < 0.0:
+                    print(cand_sampled.size(), cflat.size())
+
                 cand_sampled = [(s.item(), p.item(), o.item()) for s, p, o in cand_sampled]
+
 
             else:
                 cflat = torch.tensor(cflat)
@@ -626,7 +639,7 @@ class SimpleRGCN(nn.Module):
 
         self.gbias, self.sbias, self.pbias, self.obias = cls.gbias, cls.sbias, cls.pbias, cls.obias
 
-    def forward(self, batch, globals):
+    def forward(self, batch : Batch, globals):
 
         n, r, e = batch.num_nodes(), self.r, self.emb
         cflat = batch.cflat()
@@ -667,7 +680,7 @@ class SimpleRGCN(nn.Module):
 
                     raise e
 
-                gb, sb, pb, ob = self.gbias, self.sbias[si], self.pbias[pi], self.obias[oi]
+                gb, sb, pb, ob = self.gbias, self.sbias[batch.to_data_nodes(si)], self.pbias[pi], self.obias[batch.to_data_nodes(oi)]
 
                 # compute the score (bilinear dot product)
                 semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
@@ -692,7 +705,7 @@ class SimpleRGCN(nn.Module):
         # perform message passing
         output = util.spmm(indices, values, (n * r, n), batch.embeddings())
 
-        if random.random() < 0.01:
+        if random.random() < 0.0:
             # print(semb.mean(dim=1), pemb.mean(dim=1), oemb.mean(dim=1))
             # print((semb * pemb * oemb).sum(dim=1) / e)
             # print(((semb * pemb * oemb).sum(dim=1) / e).exp())
