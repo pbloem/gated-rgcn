@@ -31,7 +31,7 @@ TODO:
 
 """
 
-ACTIVATION = F.softplus
+ACTIVATION = F.sigmoid
 
 def heapselect(generator, keyfunc, k):
     """
@@ -317,6 +317,11 @@ class SamplingClassifier(nn.Module):
 
         self.embeddings = nn.Parameter(torch.FloatTensor(n, emb).normal_())
 
+        self.gbias = nn.Parameter(torch.zeros((1,)))
+        self.sbias = nn.Parameter(torch.zeros((self.n,)))
+        self.pbias = nn.Parameter(torch.zeros((self.r,)))
+        self.obias = nn.Parameter(torch.zeros((self.n,)))
+
         # global attention params
         self.relations = nn.Parameter(torch.randn(self.r, emb).uniform_(-1/sqrt(emb), 1/sqrt(emb)))
         self.tokeys = nn.Parameter(torch.randn(emb, emb).uniform_(-1/sqrt(emb), 1/sqrt(emb)))
@@ -334,16 +339,16 @@ class SamplingClassifier(nn.Module):
         for d in range(depth):
             if forward_mp and d != 0:
                 layers.append(SimpleRGCN(self.graph, self.r, emb, bases=bases, dropout=dropout, nodes=self.embeddings,
-                                         tokeys=self.tokeys, toqueries=self.toqueries, relations=self.relations,  **kwargs))
+                                         tokeys=self.tokeys, toqueries=self.toqueries, relations=self.relations, cls=self **kwargs))
 
             layers.append(Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
-                                 toqueries=self.toqueries, ksample=ksample, boost=boost, csample=csample,
+                                 toqueries=self.toqueries, ksample=ksample, boost=boost, csample=csample, cls=self,
                                  indep=(self.edgeweights, self.e2i) if indep else None,
                                 **kwargs))
 
         for _ in range(depth):
             layers += [SimpleRGCN(self.graph, self.r, emb, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
-                                 toqueries=self.toqueries, bases=bases, dropout=dropout,
+                                 toqueries=self.toqueries, bases=bases, dropout=dropout, cls=self,
                                  indep=(self.edgeweights, self.e2i) if indep else None,
                                   **kwargs),
                        FF(emb=emb)
@@ -354,6 +359,8 @@ class SamplingClassifier(nn.Module):
         self.cls = nn.Linear(emb, num_cls)
 
         self.indep = indep
+
+
 
     def set(self, parm, value):
 
@@ -478,7 +485,7 @@ class Sample(nn.Module):
     Samples a _fixed_ number of extra edges (if enough incident edges are available)
     """
 
-    def __init__(self, graph, nodes=None, relations=None, tokeys=None, toqueries=None, ksample=50, csample=None, indep=None, **kwargs):
+    def __init__(self, graph, nodes=None, relations=None, tokeys=None, toqueries=None, ksample=50, csample=None, indep=None, cls=None, **kwargs):
         super().__init__()
 
         self.graph = graph
@@ -497,6 +504,7 @@ class Sample(nn.Module):
             self.attn, self.e2i = indep
             self.indep = True
 
+        self.gbias, self.sbias, self.pbias, self.obias = cls.gbias, cls.sbias, cls.pbias, cls.obias
 
     def forward(self, batch : Batch, globals):
         """
@@ -541,18 +549,20 @@ class Sample(nn.Module):
                     # Reduce the candidates further by reservoir sampling with the actual weights
                     embeddings = self.nodes # raw embeddings (not batch embeddings)
 
-                    si, pi, oi = [s for s, _, _ in cflat], [p for _, p, _ in cflat], [o for _, _, o in cflat]
+                    si, pi, oi = torch.tensor([s for s, _, _ in cflat]), torch.tensor([p for _, p, _ in cflat]), torch.tensor([o for _, _, o in cflat])
 
                     # print(max(si), max(pi), max(oi))
                     # print(embeddings.size())
 
                     semb, pemb, oemb, = embeddings[si, :], self.relations[pi, :], embeddings[oi, :]
+                    gb, sb, pb, ob = self.gbias, self.sbias[si], self.pbias[pi], self.obias[oi]
 
                     # compute the score (bilinear dot product)
                     semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
                     oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
 
-                    dots = (semb * pemb * oemb).sum(dim=1) / e
+                    dots = (semb * pemb * oemb).sum(dim=1) + sb + pb + ob + gb
+                    # dots = dots / e
 
                 # WRS with a full sort (optimize later)
                 u = torch.rand(*dots.size(), device=d(dots))
@@ -585,7 +595,7 @@ class SimpleRGCN(nn.Module):
 
     """
 
-    def __init__(self, graph, r, emb, nodes, bases=None, dropout=None, use_global_weights=False, tokeys=None, toqueries=None, relations=None, indep=None, **kwargs):
+    def __init__(self, graph, r, emb, nodes, bases=None, dropout=None, use_global_weights=False, tokeys=None, toqueries=None, relations=None, indep=None, cls = None,**kwargs):
         super().__init__()
 
         self.r, self.emb = r, emb
@@ -613,6 +623,8 @@ class SimpleRGCN(nn.Module):
         if indep is not None:
             self.attn, self.e2i = indep
             self.indep = True
+
+        self.gbias, self.sbias, self.pbias, self.obias = cls.gbias, cls.sbias, cls.pbias, cls.obias
 
     def forward(self, batch, globals):
 
@@ -648,17 +660,21 @@ class SimpleRGCN(nn.Module):
 
                 try:
                     semb, pemb, oemb = embeddings[si, :], self.relations[pi, :], embeddings[oi, :]
+
                 except Exception as e:
                     print(si.max(), pi.max(), oi.max())
                     print(embeddings.size())
 
                     raise e
 
+                gb, sb, pb, ob = self.gbias, self.sbias[si], self.pbias[pi], self.obias[oi]
+
                 # compute the score (bilinear dot product)
                 semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
                 oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
 
-                dots = (semb * pemb * oemb).sum(dim=1) / e
+                dots = (semb * pemb * oemb).sum(dim=1) + sb + pb + ob + gb
+                # dots = dots / e
 
 
             values = torch.ones((indices.size(0), ), device=d(), dtype=torch.float)
