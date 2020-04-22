@@ -149,7 +149,7 @@ class RGCNEmb(nn.Module):
         self.numcls = numcls
 
         # horizontally and vertically stacked versions of the adjacency graph
-        # hor_ind, hor_size = util.adj(edges, n, vertical=False)
+        hor_ind, hor_size = util.adj(edges, n, vertical=False)
         ver_ind, ver_size = util.adj(edges, n, vertical=True)
 
         rn, _ = ver_size
@@ -162,8 +162,8 @@ class RGCNEmb(nn.Module):
         # -- the values are the same for the horizontal and the vertically stacked adjacency matrices
         #    so we can just normalize them by the vertically stacked one and reuse for the horizontal
 
-        # hor_graph = torch.sparse.FloatTensor(indices=hor_ind.t(), values=vals, size=hor_size)
-        # self.register_buffer('hor_graph', hor_graph)
+        hor_graph = torch.sparse.FloatTensor(indices=hor_ind.t(), values=vals, size=hor_size)
+        self.register_buffer('hor_graph', hor_graph)
 
         ver_graph = torch.sparse.FloatTensor(indices=ver_ind.t(), values=vals, size=ver_size)
         self.register_buffer('ver_graph', ver_graph)
@@ -216,11 +216,10 @@ class RGCNEmb(nn.Module):
 
         assert weights.size() == (r, self.emb, self.h)
 
-        # Apply weights and sum over relations
-        hidden1 = torch.mm(self.ver_graph, self.embeddings) # sparse mm
-        hidden1 = hidden1.view(r, n, self.emb)
+        # apply weights first
+        xw = torch.einsum('ne, reh -> rnh', self.embeddings, weights).contiguous()
 
-        hidden1 = torch.einsum('rhc, rnh -> nc', weights, hidden1)
+        hidden1 = torch.mm(self.hor_graph, xw.view(r*n, self.h)) # sparse mm
 
         assert hidden1.size() == (n, self.h)
 
@@ -243,6 +242,8 @@ class RGCNEmb(nn.Module):
         assert hidden2.size() == (n, c)
 
         return hidden2 + self.bias2 #-- softmax is applied in the loss
+
+
 
 class NodeClassifier(nn.Module):
 
