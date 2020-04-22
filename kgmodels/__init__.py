@@ -1,4 +1,4 @@
-from .models import GraphBlock, NodeClassifier, RGCNClassic
+from .models import GraphBlock, NodeClassifier, RGCNClassic, RGCNEmb
 
 from .layers import GAT, GCN
 

@@ -105,6 +105,8 @@ def go(arg):
         """
         if arg.mixer == 'classic':
             model = kgmodels.RGCNClassic(edges=edges, n=N, numcls=num_cls, emb=arg.emb, bases=arg.bases, softmax=arg.softmax)
+        elif arg.mixer == 'emb':
+            model = kgmodels.RGCNEmb(edges=edges, n=N, numcls=num_cls, emb=arg.emb1, h=arg.emb, bases=arg.bases)
         else:
             model = kgmodels.NodeClassifier(edges=edges, n=N, depth=arg.depth, emb=arg.emb, mixer=arg.mixer, numcls=num_cls,
                                         dropout=arg.do, bases=arg.bases, norm_method=arg.norm_method, heads=arg.heads,
@@ -192,8 +194,13 @@ if __name__ == "__main__":
 
     parser.add_argument("-E", "--embedding-size",
                         dest="emb",
-                        help="Size (nr of dimensions) of the node embeddings.",
+                        help="Size (nr of dimensions) of the hidden layer.",
                         default=16, type=int)
+
+    parser.add_argument("--embedding-init",
+                        dest="emb1",
+                        help="Size (nr of dimensions) of the _initial_ node embeddings.",
+                        default=128, type=int)
 
     parser.add_argument("-l", "--learn-rate",
                         dest="lr",

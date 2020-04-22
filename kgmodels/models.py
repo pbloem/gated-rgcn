@@ -133,6 +133,117 @@ class RGCNClassic(nn.Module):
 
         return h + self.bias2 #-- softmax is applied in the loss
 
+class RGCNEmb(nn.Module):
+    """
+    RGCN with single node embeddings and two GCN layers.
+
+    """
+
+    def __init__(self, edges, n, numcls, emb=128, h=16, bases=None):
+
+        super().__init__()
+
+        self.emb = emb
+        self.h = h
+        self.bases = bases
+        self.numcls = numcls
+
+        # horizontally and vertically stacked versions of the adjacency graph
+        # hor_ind, hor_size = util.adj(edges, n, vertical=False)
+        ver_ind, ver_size = util.adj(edges, n, vertical=True)
+
+        rn, _ = ver_size
+        r = rn//n
+
+        t = len(edges[0][0])
+
+        vals = torch.ones(ver_ind.size(0), dtype=torch.float)
+        vals = vals / util.sum_sparse(ver_ind, vals, ver_size)
+        # -- the values are the same for the horizontal and the vertically stacked adjacency matrices
+        #    so we can just normalize them by the vertically stacked one and reuse for the horizontal
+
+        # hor_graph = torch.sparse.FloatTensor(indices=hor_ind.t(), values=vals, size=hor_size)
+        # self.register_buffer('hor_graph', hor_graph)
+
+        ver_graph = torch.sparse.FloatTensor(indices=ver_ind.t(), values=vals, size=ver_size)
+        self.register_buffer('ver_graph', ver_graph)
+
+        self.embeddings = nn.Parameter(torch.FloatTensor(n, emb)) # single embedding per node
+        nn.init.xavier_uniform_(self.embeddings, gain=nn.init.calculate_gain('relu'))
+
+        # layer 1 weights
+        if bases is None:
+            self.weights1 = nn.Parameter(torch.FloatTensor(r, emb, h))
+            nn.init.xavier_uniform_(self.weights1, gain=nn.init.calculate_gain('relu'))
+
+            self.bases1 = None
+        else:
+            self.comps1 = nn.Parameter(torch.FloatTensor(r, bases))
+            nn.init.xavier_uniform_(self.comps1, gain=nn.init.calculate_gain('relu'))
+
+            self.bases1 = nn.Parameter(torch.FloatTensor(bases, emb, h))
+            nn.init.xavier_uniform_(self.bases1, gain=nn.init.calculate_gain('relu'))
+
+        # layer 2 weights
+        if bases is None:
+
+            self.weights2 = nn.Parameter(torch.FloatTensor(r, h, numcls) )
+            nn.init.xavier_uniform_(self.weights2, gain=nn.init.calculate_gain('relu'))
+
+            self.bases2 = None
+        else:
+            self.comps2 = nn.Parameter(torch.FloatTensor(r, bases))
+            nn.init.xavier_uniform_(self.comps2, gain=nn.init.calculate_gain('relu'))
+
+            self.bases2 = nn.Parameter(torch.FloatTensor(bases, h, numcls))
+            nn.init.xavier_uniform_(self.bases2, gain=nn.init.calculate_gain('relu'))
+
+        self.bias1 = nn.Parameter(torch.FloatTensor(h).zero_())
+        self.bias2 = nn.Parameter(torch.FloatTensor(numcls).zero_())
+
+    def forward(self):
+
+        ## Layer 1
+
+        rn, n = self.ver_graph.size()
+        r = rn // n
+        b, c = self.bases, self.numcls
+
+        if self.bases1 is not None:
+            weights = torch.einsum('rb, bij -> rij', self.comps1, self.bases1)
+        else:
+            weights = self.weights1
+
+        assert weights.size() == (r, self.emb, self.h)
+
+        # Apply weights and sum over relations
+        hidden1 = torch.mm(self.ver_graph, self.embeddings) # sparse mm
+        hidden1 = hidden1.view(r, n, self.emb)
+
+        hidden1 = torch.einsum('rhc, rnh -> nc', weights, hidden1)
+
+        assert hidden1.size() == (n, self.h)
+
+        hidden1 = F.relu(hidden1 + self.bias1)
+
+        ## Layer 2
+
+        if self.bases2 is not None:
+            weights = torch.einsum('rb, bij -> rij', self.comps2, self.bases2)
+        else:
+            weights = self.weights2
+
+        # Multiply adjacencies by hidden
+        hidden2 = torch.mm(self.ver_graph, hidden1) # sparse mm
+        hidden2 = hidden2.view(r, n, self.h) # new dim for the relations
+
+        # Apply weights, sum over relations
+        hidden2 = torch.einsum('rhc, rnh -> nc', weights, hidden2)
+
+        assert hidden2.size() == (n, c)
+
+        return hidden2 + self.bias2 #-- softmax is applied in the loss
+
 class NodeClassifier(nn.Module):
 
     def __init__(self, edges, n, numcls, mixer='gcn', emb=16, depth=2, sep_emb=False, **kwargs):
