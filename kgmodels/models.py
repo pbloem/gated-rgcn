@@ -139,7 +139,7 @@ class RGCNEmb(nn.Module):
 
     """
 
-    def __init__(self, edges, n, numcls, emb=128, h=16, bases=None):
+    def __init__(self, edges, n, numcls, emb=128, h=16, bases=None, separate_emb=False):
 
         super().__init__()
 
@@ -147,6 +147,7 @@ class RGCNEmb(nn.Module):
         self.h = h
         self.bases = bases
         self.numcls = numcls
+        self.separate_emb = separate_emb
 
         # horizontally and vertically stacked versions of the adjacency graph
         hor_ind, hor_size = util.adj(edges, n, vertical=False)
@@ -168,8 +169,12 @@ class RGCNEmb(nn.Module):
         ver_graph = torch.sparse.FloatTensor(indices=ver_ind.t(), values=vals, size=ver_size)
         self.register_buffer('ver_graph', ver_graph)
 
-        self.embeddings = nn.Parameter(torch.FloatTensor(n, emb)) # single embedding per node
-        nn.init.xavier_uniform_(self.embeddings, gain=nn.init.calculate_gain('relu'))
+        if separate_emb:
+            self.embeddings = nn.Parameter(torch.FloatTensor(r, n, emb))  # single embedding per node
+            nn.init.xavier_uniform_(self.embeddings, gain=nn.init.calculate_gain('relu'))
+        else:
+            self.embeddings = nn.Parameter(torch.FloatTensor(n, emb)) # single embedding per node
+            nn.init.xavier_uniform_(self.embeddings, gain=nn.init.calculate_gain('relu'))
 
         # layer 1 weights
         if bases is None:
@@ -217,7 +222,11 @@ class RGCNEmb(nn.Module):
         assert weights.size() == (r, self.emb, self.h)
 
         # apply weights first
-        xw = torch.einsum('ne, reh -> rnh', self.embeddings, weights).contiguous()
+        if self.separate_emb:
+            xw = torch.einsum('rne, reh -> rnh', self.embeddings, weights).contiguous()
+            # xw = self.embeddings
+        else:
+            xw = torch.einsum('ne, reh -> rnh', self.embeddings, weights).contiguous()
 
         hidden1 = torch.mm(self.hor_graph, xw.view(r*n, self.h)) # sparse mm
 
