@@ -176,7 +176,7 @@ def go(arg):
 
                 # plot edgeweights
 
-                weights = model.edgeweights()
+                weights = model.edgeweights().cpu().numpy()
                 plt.hist(weights, bins=100)
                 plt.yscale('log')
                 plt.savefig(f'edgeweights.{e:03}.png')
