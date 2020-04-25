@@ -373,7 +373,7 @@ class RGCNWeighted(nn.Module):
         ss = self.sscore(self.embeddings[self.indices[:, 2]])
 
         scores = (os * ps * ss).sum(dim=1) / sqrt(self.h)
-        values = self.values * F.softplus(scores)
+        values = F.softplus(scores) # * self.values
 
         if self.bases1 is not None:
             weights = torch.einsum('rb, bij -> rij', self.comps1, self.bases1)
