@@ -262,7 +262,7 @@ class RGCNWeighted(nn.Module):
 
     """
 
-    def __init__(self, edges, n, numcls, emb=128, h=16, bases=None, separate_emb=False):
+    def __init__(self, edges, n, numcls, emb=128, h=16, bases=None, separate_emb=False, indep=False):
 
         super().__init__()
 
@@ -332,13 +332,6 @@ class RGCNWeighted(nn.Module):
         self.bias1 = nn.Parameter(torch.FloatTensor(h).zero_())
         self.bias2 = nn.Parameter(torch.FloatTensor(numcls).zero_())
 
-        # for computing the attention weights
-        self.sscore  = nn.Linear(emb, h)
-        self.pscore = nn.Parameter(torch.FloatTensor(r, h))
-        nn.init.xavier_uniform_(self.pscore, gain=nn.init.calculate_gain('relu'))
-        self.oscore = nn.Linear(emb, h)
-        # maybe h is too small?
-
         # convert the edges dict to a matrix of triples
         s, o, p = [], [], []
         for pred, (sub, obj) in edges.items():
@@ -349,16 +342,29 @@ class RGCNWeighted(nn.Module):
         # graph as triples
         self.register_buffer('indices', torch.tensor([s, p, o], dtype=torch.long).t())
 
+        # for computing the attention weights
+        self.indep = indep
+        if indep:
+            self.weights = nn.Parameter(torch.randn(self.indices.size(0)))
+        else:
+            self.sscore  = nn.Linear(emb, h)
+            self.pscore = nn.Parameter(torch.FloatTensor(r, h))
+            nn.init.xavier_uniform_(self.pscore, gain=nn.init.calculate_gain('relu'))
+            self.oscore = nn.Linear(emb, h)
+            # maybe h is too small?
+
     def edgeweights(self):
 
-        # attention weights
-        os = self.sscore(self.embeddings[self.indices[:, 0]])
-        ps = self.pscore[self.indices[:, 1]]
-        ss = self.sscore(self.embeddings[self.indices[:, 2]])
+        if self.indep:
+            scores = self.weights
+        else:
+            os = self.sscore(self.embeddings[self.indices[:, 0]])
+            ps = self.pscore[self.indices[:, 1]]
+            ss = self.sscore(self.embeddings[self.indices[:, 2]])
 
-        scores = (os * ps * ss).sum(dim=1) / sqrt(self.h)
+            scores = (os * ps * ss).sum(dim=1) / sqrt(self.h)
 
-        return F.softplus(scores)
+        return T.sigmoid(scores)
 
     def forward(self):
 
@@ -367,13 +373,7 @@ class RGCNWeighted(nn.Module):
         r, rn, n = self.r, self.rn, self.n
         b, c = self.bases, self.numcls
 
-        # attention weights
-        os = self.sscore(self.embeddings[self.indices[:, 0]])
-        ps = self.pscore[self.indices[:, 1]]
-        ss = self.sscore(self.embeddings[self.indices[:, 2]])
-
-        scores = (os * ps * ss).sum(dim=1) / sqrt(self.h)
-        values = F.softplus(scores) # * self.values
+        values = self.edgeweights() # * self.values
 
         if self.bases1 is not None:
             weights = torch.einsum('rb, bij -> rij', self.comps1, self.bases1)

@@ -113,7 +113,7 @@ def go(arg):
             model = kgmodels.RGCNEmb(edges=edges, n=N, numcls=num_cls, emb=arg.emb1, h=arg.emb, bases=arg.bases, separate_emb=arg.sep_emb)
         elif arg.mixer == 'weighted':
             model = kgmodels.RGCNWeighted(edges=edges, n=N, numcls=num_cls, emb=arg.emb1, h=arg.emb, bases=arg.bases,
-                                     separate_emb=arg.sep_emb)
+                                     separate_emb=arg.sep_emb, indep=arg.indep)
         else:
             model = kgmodels.NodeClassifier(edges=edges, n=N, depth=arg.depth, emb=arg.emb, mixer=arg.mixer, numcls=num_cls,
                                         dropout=arg.do, bases=arg.bases, norm_method=arg.norm_method, heads=arg.heads,
@@ -251,6 +251,11 @@ if __name__ == "__main__":
     parser.add_argument("-N", "--normalize",
                         dest="normalize",
                         help="Normalize the embeddings.",
+                        action="store_true")
+
+    parser.add_argument("--indep",
+                        dest="indep",
+                        help="Learn independent attention weights for each edge instead of ones derived from node embeddings).",
                         action="store_true")
 
     parser.add_argument("-F", "--final", dest="final",
