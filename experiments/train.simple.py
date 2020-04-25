@@ -80,7 +80,7 @@ def go(arg):
 
         train_idx, test_idx = [n.item() for n in train_idx], [n.item() for n in test_idx]
 
-        model = kgmodels.SimpleClassifier(graph=edges, n=N, depth=arg.depth, emb=arg.emb, h=32, ksample=arg.ksample,
+        model = kgmodels.SimpleClassifier(graph=edges, n=N, depth=arg.depth, emb=arg.emb, h=arg.hidden, ksample=arg.ksample,
                 num_cls=num_cls, boost=arg.boost, bases=arg.bases, dropout=arg.do,
                 use_global_weights=not arg.ignore_globals)
 
@@ -198,6 +198,11 @@ if __name__ == "__main__":
 
     parser.add_argument("-E", "--embedding-size",
                         dest="emb",
+                        help="Size (nr of dimensions) of the node embeddings.",
+                        default=128, type=int)
+
+    parser.add_argument("-H", "--hidden-size",
+                        dest="hidden",
                         help="Size (nr of dimensions) of the node embeddings.",
                         default=16, type=int)
 

@@ -335,9 +335,10 @@ class SimpleClassifier(nn.Module):
         self.obias = nn.Parameter(torch.zeros((self.n,)))
 
         # global attention params
-        self.relations = nn.Parameter(torch.randn(self.r, h).uniform_(-1/sqrt(h), 1/sqrt(h)))
-        self.tokeys    = nn.Parameter(torch.randn(emb, h).uniform_(-1/sqrt(h), 1/sqrt(h)))
-        self.toqueries = nn.Parameter(torch.randn(emb, h).uniform_(-1/sqrt(h), 1/sqrt(h)))
+        self.relations = nn.Parameter(torch.randn(self.r, h))
+        nn.init.xavier_uniform_(self.relations, gain=nn.init.calculate_gain('relu'))
+        self.tokeys    = nn.Linear(emb, h)
+        self.toqueries = nn.Linear(emb, h)
 
         layers = []
         layers.append(
@@ -379,7 +380,7 @@ class Sample(nn.Module):
     Samples a _fixed_ number of extra edges (if enough incident edges are available)
     """
 
-    def __init__(self, graph, nodes=None, relations=None, tokeys=None, toqueries=None, ksample=50, indep=None, cls=None, **kwargs):
+    def __init__(self, graph, nodes=None, relations=None, tokeys=None, toqueries=None, ksample=50, cls=None, **kwargs):
         super().__init__()
 
         self.graph = graph
@@ -425,14 +426,17 @@ class Sample(nn.Module):
                 gb, sb, pb, ob = self.gbias, self.sbias[si], self.pbias[pi], self.obias[oi]
 
                 # compute the score (bilinear dot product)
-                semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
-                oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
+                # semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
+                # oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
+                semb = self.tokeys(semb)
+                oemb = self.toqueries(oemb)
 
                 dots = (semb * pemb * oemb).sum(dim=1) + sb + pb + ob + gb
+                dots = ACTIVATION(dots)
 
                 # WRS with a full sort (optimize later)
                 u = torch.rand(*dots.size(), device=d(dots))
-                weights = u.log() / ACTIVATION(dots)
+                weights = u.log() / dots
 
                 weights, indices = torch.sort(weights, descending=True)
                 indices = indices[:self.ksample]

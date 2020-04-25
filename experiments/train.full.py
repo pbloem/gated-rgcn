@@ -20,6 +20,10 @@ import rgat
 
 from argparse import ArgumentParser
 
+import matplotlib as mpl
+mpl.use('Agg')
+import matplotlib.pyplot as plt
+
 """
 Full batch training GAT and RGCN
 
@@ -129,6 +133,8 @@ def go(arg):
         else:
             raise Exception
 
+        plt.figure()
+
         for e in range(arg.epochs):
 
             model.train(True)
@@ -167,6 +173,14 @@ def go(arg):
                 prt(f',   test accuracy {float(accuracy):.2}')
                 if e == arg.epochs - 1:
                     test_accs.append(float(accuracy))
+
+                # plot edgeweights
+
+                weights = model.edgeweights()
+                plt.hist(weights, bins=100)
+                plt.yscale('log')
+                plt.savefig(f'edgeweights.{e:03}.png')
+                plt.clf()
 
             if torch.cuda.is_available():
                 del loss # clear memory

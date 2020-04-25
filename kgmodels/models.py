@@ -254,6 +254,8 @@ class RGCNEmb(nn.Module):
 
         return hidden2 + self.bias2 #-- softmax is applied in the loss
 
+MULT = 100
+
 class RGCNWeighted(nn.Module):
     """
     RGCN with single node embeddings,two GCN layers, and derived weights for each edges
@@ -347,6 +349,17 @@ class RGCNWeighted(nn.Module):
         # graph as triples
         self.register_buffer('indices', torch.tensor([s, p, o], dtype=torch.long).t())
 
+    def edgeweights(self):
+
+        # attention weights
+        os = self.sscore(self.embeddings[self.indices[:, 0]])
+        ps = self.pscore[self.indices[:, 1]]
+        ss = self.sscore(self.embeddings[self.indices[:, 2]])
+
+        scores = (os * ps * ss).sum(dim=1) / sqrt(self.h)
+
+        return F.softplus(scores)
+
     def forward(self):
 
         ## Layer 1
@@ -360,7 +373,7 @@ class RGCNWeighted(nn.Module):
         ss = self.sscore(self.embeddings[self.indices[:, 2]])
 
         scores = (os * ps * ss).sum(dim=1) / sqrt(self.h)
-        values = self.values * T.sigmoid(scores)  # F.softplus(dots)
+        values = self.values * F.softplus(scores)
 
         if self.bases1 is not None:
             weights = torch.einsum('rb, bij -> rij', self.comps1, self.bases1)
