@@ -2,6 +2,8 @@ import torch, os, sys
 
 from torch import nn
 import torch.nn.functional as F
+import torch.distributions as ds
+
 from math import sqrt, ceil
 
 import layers, util
@@ -262,7 +264,7 @@ class RGCNWeighted(nn.Module):
 
     """
 
-    def __init__(self, edges, n, numcls, emb=128, h=16, bases=None, separate_emb=False, indep=False):
+    def __init__(self, edges, n, numcls, emb=128, h=16, bases=None, separate_emb=False, indep=False, normalize=False, sample=False):
 
         super().__init__()
 
@@ -271,6 +273,8 @@ class RGCNWeighted(nn.Module):
         self.bases = bases
         self.numcls = numcls
         self.separate_emb = separate_emb
+        self.normalize = normalize
+        self.sample = sample
 
         # horizontally and vertically stacked versions of the adjacency graph
         hor_ind, hor_size = util.adj(edges, n, vertical=False)
@@ -364,7 +368,13 @@ class RGCNWeighted(nn.Module):
 
             scores = (os * ps * ss).sum(dim=1) / sqrt(self.h)
 
-        return T.sigmoid(scores)
+        if self.sample:
+            res = T.sigmoid(scores)
+            brn = ds.Bernoulli(res)
+
+            scores = brn.sample() * res
+
+        return scores
 
     def forward(self):
 
@@ -374,6 +384,8 @@ class RGCNWeighted(nn.Module):
         b, c = self.bases, self.numcls
 
         values = self.edgeweights() # * self.values
+        if self.normalize:
+            values = values / util.sum_sparse(self.ver_ind, values, (rn, n))
 
         if self.bases1 is not None:
             weights = torch.einsum('rb, bij -> rij', self.comps1, self.bases1)

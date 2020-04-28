@@ -113,7 +113,7 @@ def go(arg):
             model = kgmodels.RGCNEmb(edges=edges, n=N, numcls=num_cls, emb=arg.emb1, h=arg.emb, bases=arg.bases, separate_emb=arg.sep_emb)
         elif arg.mixer == 'weighted':
             model = kgmodels.RGCNWeighted(edges=edges, n=N, numcls=num_cls, emb=arg.emb1, h=arg.emb, bases=arg.bases,
-                                     separate_emb=arg.sep_emb, indep=arg.indep)
+                                     separate_emb=arg.sep_emb, indep=arg.indep, sample=arg.sample)
         else:
             model = kgmodels.NodeClassifier(edges=edges, n=N, depth=arg.depth, emb=arg.emb, mixer=arg.mixer, numcls=num_cls,
                                         dropout=arg.do, bases=arg.bases, norm_method=arg.norm_method, heads=arg.heads,
@@ -147,6 +147,9 @@ def go(arg):
             if arg.l2weight is not None:
                 l2 = sum([p.pow(2).sum() for p in model.parameters()])
                 loss = loss + arg.l2weight * l2
+
+            if arg.l1 > 0.0:
+                loss = loss + arg.l1 * model.edgeweights().norm(p=1)
 
             loss.backward()
 
@@ -248,14 +251,14 @@ if __name__ == "__main__":
                         help="Which mixing layer to use [gcn, gat]",
                         default='gcn', type=str)
 
-    parser.add_argument("-N", "--normalize",
-                        dest="normalize",
-                        help="Normalize the embeddings.",
-                        action="store_true")
-
     parser.add_argument("--indep",
                         dest="indep",
                         help="Learn independent attention weights for each edge instead of ones derived from node embeddings).",
+                        action="store_true")
+
+    parser.add_argument("--normalize",
+                        dest="normalize",
+                        help="Normalize the weighted adjacency matrix.",
                         action="store_true")
 
     parser.add_argument("-F", "--final", dest="final",
@@ -307,6 +310,11 @@ if __name__ == "__main__":
                         help="Amount of diffusion in the fan graph.",
                         default=5, type=int)
 
+    parser.add_argument("--l1",
+                        dest="l1",
+                        help="L1 loss term for the weights.",
+                        default=0.0, type=float)
+
     parser.add_argument("--nm",
                         dest="norm_method",
                         help="Method for row-normalizing the GAT attention weights.",
@@ -354,6 +362,9 @@ if __name__ == "__main__":
                         help="Apply the softmax (apparently twice).",
                         action="store_true")
 
+    parser.add_argument("--sample", dest="sample",
+                        help="Subsample the graph according to the weights.",
+                        action="store_true")
 
     options = parser.parse_args()
 
