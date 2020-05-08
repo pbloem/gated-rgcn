@@ -198,11 +198,11 @@ def go(arg):
 
                         sorted_candidates = [tuple(p[0]) for p in sorted(zip(candidates.tolist(), scores.tolist()), key=lambda p : -p[1])]
 
-                        rank = sorted_candidates.index((s, p, ot))
+                        rank = (sorted_candidates.index((s, p, ot)) + 1)
 
-                        hitsat1 += (rank == 0)
-                        hitsat3 += (rank < 3)
-                        hitsat10 += (rank < 10)
+                        hitsat1 += (rank == 1)
+                        hitsat3 += (rank <= 3)
+                        hitsat10 += (rank <= 10)
                         mrr += 1.0/rank
 
                     mrr = mrr / len(test)
