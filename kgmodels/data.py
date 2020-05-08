@@ -210,6 +210,69 @@ def load(name, final=False, limit=None, bidir=False, prune=False):
 
     return edges, (n2i, i2n), (r2i, i2r), train, test
 
+def load_strings(file):
+
+    with open(file, 'r') as f:
+        return [line.split() for line in f]
+
+def load_lp(name, final=False, limit=None, bidir=False, prune=False):
+    """
+    Loads a knowledge graph dataset. Self connections are NOT automatically added
+
+    :param name: Dataset name ('fb' or 'wn' at the moment)
+    :param final: If true, load the set set and train+val to train on. Otherwise load train and val
+    :param limit: If set, the number of unique relations will be limited to this value, plus one for the self-connections,
+                  plus one for the remaining connections combined into a single, new relation.
+    :return: two lists of triples (train, test), two pairs of dicts for nodes and relations
+    """
+
+    if name == 'fb': # Freebae 15k 237
+        train_file = util.here('data/fb15k237/train.txt')
+        val_file = util.here('data/fb15k237/valid.txt')
+        test_file = util.here('data/fb15k237/test.txt')
+
+    elif name == 'wn':
+        train_file = util.here('data/wn18rr/train.txt')
+        val_file = util.here('data/wn18rr/valid.txt')
+        test_file = util.here('data/wn18rr/test.txt')
+
+    else:
+        raise Exception(f'Data {name} not recognized')
+
+    train = load_strings(train_file)
+    val   = load_strings(val_file)
+    test  = load_strings(test_file)
+
+    if not final:
+        test = val
+    else:
+        train = train + val
+
+    if limit:
+        train = train[:limit]
+        test = test[:limit]
+
+    # mappings for nodes (n) and relations (r)
+    nodes, rels = set(), set()
+    for triple in train + val + test:
+        nodes.add(triple[0])
+        rels.add(triple[1])
+        nodes.add(triple[2])
+
+    i2n, i2r = list(nodes), list(rels)
+    n2i, r2i = {n:i for i, n in enumerate(nodes)}, {r:i for i, r in enumerate(rels)}
+
+    traini, testi = [], []
+    for st in train:
+        traini.append([n2i[st[0]], r2i[st[1]], n2i[st[2]]])
+    for st in test:
+        testi.append([n2i[st[0]], r2i[st[1]], n2i[st[2]]])
+
+    train = torch.tensor(traini)
+    test = torch.tensor(testi)
+
+    return train, test, (n2i, i2n), (r2i, i2r)
+
 def assign(patternnode, num_nodes, entity, cls, mem, ind, sz, unique_constants=True):
     """
 

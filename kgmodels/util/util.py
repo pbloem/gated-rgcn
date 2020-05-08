@@ -94,6 +94,44 @@ def adj(edges, num_nodes, cuda=False, vertical=True):
 
     return indices.t(), size
 
+def adj_triples(triples, num_nodes, num_rels, cuda=False, vertical=True):
+    """
+    Computes a sparse adjacency matrix for the given graph (the adjacency matrices of all
+    relations are stacked vertically).
+
+    :param edges: List representing the triples
+    :param i2r: list of relations
+    :param i2n: list of nodes
+    :return: sparse tensor
+    """
+    ST = torch.cuda.sparse.FloatTensor if cuda else torch.sparse.FloatTensor
+
+    r, n = num_rels, num_nodes
+    size = (r*n, n) if vertical else (n, r*n)
+
+    from_indices = []
+    upto_indices = []
+
+    for fr, rel, to in triples:
+
+        offset = rel.item() * n
+
+        if vertical:
+            fr = offset + fr.item()
+        else:
+            to = offset + to.item()
+
+        from_indices.append(fr)
+        upto_indices.append(to)
+
+    indices = torch.tensor([from_indices, upto_indices], dtype=torch.long, device=d(cuda))
+
+    assert indices.size(1) == len(triples)
+    assert indices[0, :].max() < size[0], f'{indices[0, :].max()}, {size}, {r}'
+    assert indices[1, :].max() < size[1], f'{indices[1, :].max()}, {size}, {r}'
+
+    return indices.t(), size
+
 def sparsemm(use_cuda):
     """
     :param use_cuda:
@@ -456,5 +494,73 @@ def contains_inf(input):
     else:
         return bool(torch.isinf(input).sum() > 0)
 
+def block_diag(m):
+    """
+    courtesy of: https://gist.github.com/yulkang/2e4fc3061b45403f455d7f4c316ab168
 
+    Make a block diagonal matrix along dim=-3
+    EXAMPLE:
+    block_diag(torch.ones(4,3,2))
+
+    should give a 12 x 8 matrix with blocks of 3 x 2 ones.
+    Prepend batch dimensions if needed.
+    You can also give a list of matrices.
+
+    :type m: torch.Tensor, list
+    :rtype: torch.Tensor
+    """
+
+    if type(m) is list:
+        m = torch.cat([m1.unsqueeze(-3) for m1 in m], -3)
+
+    d = m.dim()
+    n = m.shape[-3]
+
+    siz0 = m.shape[:-3]
+    siz1 = m.shape[-2:]
+
+    m2 = m.unsqueeze(-2)
+
+    eye = attach_dim(torch.eye(n).unsqueeze(-2), d - 3, 1)
+
+    return (m2 * eye).reshape(
+        siz0 + torch.Size(torch.tensor(siz1) * n)
+    )
+
+def attach_dim(v, n_dim_to_prepend=0, n_dim_to_append=0):
+    return v.reshape(
+        torch.Size([1] * n_dim_to_prepend)
+        + v.shape
+        + torch.Size([1] * n_dim_to_append))
+
+def prod(array):
+
+    p = 1
+    for e in array:
+        p *= e
+    return p
+
+def batch(model, *inputs, batch_size=16):
+    """
+    Batch forward.
+
+    :param model: multiple input, single output
+    :param inputs: should all have the same 0 dimension
+    :return:
+    """
+
+    n = inputs[0].size(0)
+
+    outs = []
+    for fr in range(0, n, batch_size):
+        to = min(n, fr + batch_size)
+
+        batches = [inp[fr:to] for inp in inputs]
+
+        if torch.cuda.is_available():
+            batches = [inp.cuda() for inp in inputs]
+
+        outs.append(model(*batches).cpu())
+
+    return torch.cat(outs, dim=0)
 
