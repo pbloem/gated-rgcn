@@ -96,14 +96,13 @@ class RGCNLayer(nn.Module):
         h1 = self.outsize
 
         if self.decomp is None:
-            weights = self.weights1
+            weights = self.weights
 
         elif self.decomp == 'basis':
             weights = torch.einsum('rb, bij -> rij', self.comps, self.bases)
 
         elif self.decomp == 'block':
             weights = util.block_diag(self.blocks)
-
             # TODO: multiply in block form (more efficient, but implementation differs per layer type)
 
         assert weights.size() == (r, h0, h1)
