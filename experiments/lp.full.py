@@ -27,6 +27,9 @@ import matplotlib.pyplot as plt
 """
 Full batch RGCN training for link prediction
 
+TODO:
+- implement inverse relations, self-loops, edge dropout 
+
 """
 
 EPSILON = 0.000000001
@@ -203,7 +206,7 @@ def go(arg):
                         hitsat1 += (rank == 1)
                         hitsat3 += (rank <= 3)
                         hitsat10 += (rank <= 10)
-                        mrr += 1.0/rank
+                        mrr += 1.0 / rank
 
                     mrr = mrr / len(test)
                     hitsat1 = hitsat1 / len(test)
@@ -277,7 +280,7 @@ if __name__ == "__main__":
     parser.add_argument("-N", "--negative-rate",
                         dest="negative_rate",
                         help="Number of negatives for every positive",
-                        default=4, type=int)
+                        default=1, type=int)
 
     parser.add_argument("--weight-decay",
                         dest="wd",
@@ -317,16 +320,10 @@ if __name__ == "__main__":
                         help="Limit the number of relations.",
                         default=None, type=int)
 
-    parser.add_argument("--heads",
-                        dest="heads",
-                        help="Number of attention heads per relation.",
-                        default=4, type=int)
-
     parser.add_argument("--decomp",
                         dest="decomp",
                         help="decomposition method (basis, block).",
                         default=None, type=str)
-
 
     parser.add_argument("--num-bases",
                         dest="num_bases",

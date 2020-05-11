@@ -34,6 +34,7 @@ class RGCNLayer(nn.Module):
         rn, _ = ver_size
         r = rn // n
 
+        # compute values of row-normalized adjacency matrices (ame for hor and ver)
         vals = torch.ones(ver_ind.size(0), dtype=torch.float)
         vals = vals / util.sum_sparse(ver_ind, vals, ver_size)
 
@@ -155,15 +156,20 @@ class LinkPrediction(nn.Module):
     Outputs raw (linear) scores for the given triples.
     """
 
-    def __init__(self, triples, n, r, hidden=16, out=16, decomp=None, numbases=None, numblocks=None, decoder='distmult'):
+    def __init__(self, triples, n, r, depth=2, hidden=16, out=16, decomp=None, numbases=None, numblocks=None, decoder='distmult'):
 
         super().__init__()
 
-        self.layer1 = RGCNLayer(triples, n, r, insize=None, outsize=hidden, hor=True,
+        self.layer0 = RGCNLayer(triples, n, r, insize=None, outsize=hidden, hor=True,
                                 decomp=decomp, numbases=numbases, numblocks=numblocks)
 
-        self.layer2 = RGCNLayer(triples, n, r, insize=hidden, outsize=out, hor=True,
-                                decomp=decomp, numbases=numbases, numblocks=numblocks)
+        layers = []
+        for _ in range(1, depth):
+            layers.append(nn.ReLU())
+            layers.append(RGCNLayer(triples, n, r, insize=hidden, outsize=out, hor=True,
+                                decomp=decomp, numbases=numbases, numblocks=numblocks))
+
+        self.layers = nn.Sequential(*layers)
 
         self.relations = nn.Parameter(torch.FloatTensor(r, out))
         nn.init.xavier_uniform_(self.relations, gain=nn.init.calculate_gain('relu'))
@@ -180,10 +186,9 @@ class LinkPrediction(nn.Module):
         dims = triples.size()[:-1]
         triples = triples.reshape(-1, 3)
 
-        out = F.relu(self.layer1())
-        out = self.layer2(out)
+        nodes = self.layers(self.layer0())
 
-        scores = self.decoder(triples, out, self.relations)
+        scores = self.decoder(triples, nodes, self.relations)
 
         assert scores.size() == (util.prod(dims), )
 
