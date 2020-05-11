@@ -170,9 +170,9 @@ def go(arg):
                 if arg.l2weight is not None:
                     l2 = sum([p.pow(2).sum() for p in model.parameters()])
                     loss = loss + arg.l2weight * l2
-
-                if torch.cuda.is_available():
-                    print(f'\nPeak gpu memory use is {torch.cuda.max_memory_cached() / 1e9:.2} Gb')
+                #
+                # if torch.cuda.is_available():
+                #     print(f'\nPeak gpu memory use is {torch.cuda.max_memory_cached() / 1e9:.2} Gb')
 
                 loss.backward()
 
