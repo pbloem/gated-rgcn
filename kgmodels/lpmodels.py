@@ -160,8 +160,13 @@ class LinkPrediction(nn.Module):
 
         super().__init__()
 
-        self.layer0 = RGCNLayer(triples, n, r, insize=None, outsize=hidden, hor=True,
-                                decomp=decomp, numbases=numbases, numblocks=numblocks)
+        if depth == 0:
+            self.embeddings = nn.Parameter(torch.FloatTensor(n, emb))  # single embedding per node
+            nn.init.xavier_uniform_(self.embeddings, gain=nn.init.calculate_gain('relu'))
+            self.layer0 = None
+        else:
+            self.layer0 = RGCNLayer(triples, n, r, insize=None, outsize=hidden, hor=True,
+                                    decomp=decomp, numbases=numbases, numblocks=numblocks)
 
         layers = []
         for _ in range(1, depth):
@@ -186,7 +191,9 @@ class LinkPrediction(nn.Module):
         dims = triples.size()[:-1]
         triples = triples.reshape(-1, 3)
 
-        nodes = self.layers(self.layer0())
+        emb = self.embeddings if self.layer0 is None else self.layer0()
+
+        nodes = self.layers(emb)
 
         scores = self.decoder(triples, nodes, self.relations)
 
