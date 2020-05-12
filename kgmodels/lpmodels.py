@@ -133,7 +133,7 @@ def distmult(triples, nodes, relations):
     """
     Implements the distmult score function.
 
-    :param triples: batch of triples (b, 3) integers
+    :param triples: batch of triples, (b, 3) integers
     :param nodes: node embeddings
     :param relations: relation embeddings
     :return:
@@ -160,21 +160,23 @@ class LinkPrediction(nn.Module):
 
         super().__init__()
 
+        self.layer0 = self.layer1 = None
+
         if depth == 0:
-            self.embeddings = nn.Parameter(torch.FloatTensor(n, emb))  # single embedding per node
+            self.embeddings = nn.Parameter(torch.FloatTensor(n, hidden))  # single embedding per node
             nn.init.xavier_uniform_(self.embeddings, gain=nn.init.calculate_gain('relu'))
-            self.layer0 = None
-        else:
+        elif depth == 1:
+            self.layer0 = RGCNLayer(triples, n, r, insize=None, outsize=out, hor=True,
+                                    decomp=decomp, numbases=numbases, numblocks=numblocks)
+        elif depth == 2:
             self.layer0 = RGCNLayer(triples, n, r, insize=None, outsize=hidden, hor=True,
                                     decomp=decomp, numbases=numbases, numblocks=numblocks)
 
-        layers = []
-        for _ in range(1, depth):
-            layers.append(nn.ReLU())
-            layers.append(RGCNLayer(triples, n, r, insize=hidden, outsize=out, hor=True,
-                                decomp=decomp, numbases=numbases, numblocks=numblocks))
+            self.layer1 = RGCNLayer(triples, n, r, insize=hidden, outsize=out, hor=True,
+                                    decomp=decomp, numbases=numbases, numblocks=numblocks)
+        else:
+            raise Exception('Not yet implemented.')
 
-        self.layers = nn.Sequential(*layers)
 
         self.relations = nn.Parameter(torch.FloatTensor(r, out))
         nn.init.xavier_uniform_(self.relations, gain=nn.init.calculate_gain('relu'))
@@ -191,9 +193,10 @@ class LinkPrediction(nn.Module):
         dims = triples.size()[:-1]
         triples = triples.reshape(-1, 3)
 
-        emb = self.embeddings if self.layer0 is None else self.layer0()
+        nodes = self.embeddings if self.layer0 is None else self.layer0()
 
-        nodes = self.layers(emb)
+        if self.layer1 is not None:
+            nodes = self.layer1(nodes)
 
         scores = self.decoder(triples, nodes, self.relations)
 

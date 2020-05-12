@@ -115,7 +115,7 @@ def go(arg):
         if arg.model == 'classic':
             model = kgmodels.LinkPrediction(
                 triples=train, n=len(i2n), r=len(i2r), hidden=arg.emb, out=arg.emb, decomp=arg.decomp,
-                numbases=arg.num_bases, numblocks=arg.num_blocks)
+                numbases=arg.num_bases, numblocks=arg.num_blocks, depth=arg.depth)
         elif arg.model == 'emb':
             pass
         elif arg.model == 'weighted':
@@ -140,7 +140,8 @@ def go(arg):
         seen = 0
         for e in range(arg.epochs):
 
-            seeni = 0
+            seeni, sumloss = 0, 0.0
+
             for fr in trange(0, train.size(0), arg.batch):
 
                 if arg.limit is not None and seeni > arg.limit:
@@ -170,19 +171,21 @@ def go(arg):
                 if arg.l2weight is not None:
                     l2 = sum([p.pow(2).sum() for p in model.parameters()])
                     loss = loss + arg.l2weight * l2
-                #
-                # if torch.cuda.is_available():
-                #     print(f'\nPeak gpu memory use is {torch.cuda.max_memory_cached() / 1e9:.2} Gb')
 
                 loss.backward()
+                sumloss += float(loss.item())
 
                 opt.step()
 
                 seen += b; seeni += b
 
+            print(f'epoch {e}; training loss {sumloss/seeni:.4}')
+
             # Evaluate
             if e % arg.eval_int == 0:
                 with torch.no_grad():
+
+                    ranks = []
 
                     mrr = hitsat1 = hitsat3 = hitsat10 = 0.0
 
@@ -206,6 +209,7 @@ def go(arg):
                         sorted_candidates = [tuple(p[0]) for p in sorted(zip(candidates.tolist(), scores.tolist()), key=lambda p : -p[1])]
 
                         rank = (sorted_candidates.index((s, p, ot)) + 1)
+                        ranks.append(rank)
 
                         hitsat1 += (rank == 1)
                         hitsat3 += (rank <= 3)
@@ -218,7 +222,7 @@ def go(arg):
                     hitsat10 = hitsat10 / len(test)
 
                     print(f'epoch {e}: MRR {mrr:.4}\t hits@1 {hitsat1:.4}\t  hits@3 {hitsat3:.4}\t  hits@10 {hitsat10:.4}')
-
+                    print(f'   ranks : {ranks[:10]}')
 
     print('training finished.')
 
