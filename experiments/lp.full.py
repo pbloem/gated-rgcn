@@ -29,6 +29,8 @@ Full batch RGCN training for link prediction
 
 TODO:
 - implement inverse relations, self-loops, edge dropout 
+- tail and head rank (sum the MRR, hits@k; double the denominator)
+- 
 
 """
 
@@ -157,7 +159,14 @@ def go(arg):
                 triples = positives[:, None, :].expand(b, ng + 1, 3).contiguous()
                 corrupt(triples, len(i2n))
 
-                labels = torch.cat([torch.ones(b, 1), torch.zeros(b, ng)], dim=1)
+                if arg.loss == 'bce':
+                    labels = torch.cat([torch.ones(b, 1), torch.zeros(b, ng)], dim=1)
+                elif arg.loss == 'ce':
+                    labels = torch.zeros(b)
+                    # -- CE loss treats the problem as a multiclass classification problem: for a positive triple,
+                    #    together with its k corruptions, identify which is the true triple. This is always triple 0,
+                    #    but the score function is order equivariant, so i can't see the index of the triple it's
+                    #    classifying.
 
                 if torch.cuda.is_available():
                     triples, labels = triples.cuda(), labels.cuda()
@@ -166,7 +175,12 @@ def go(arg):
 
                 out = model(triples)
 
-                loss = F.binary_cross_entropy_with_logits(out, labels)
+                assert out.size() == (b, ng + 1)
+
+                if arg.loss == 'bce':
+                    loss = F.binary_cross_entropy_with_logits(out, labels)
+                elif arg.loss == 'ce':
+                    loss = F.cross_entropy(out, labels)
 
                 if arg.l2weight is not None:
                     l2 = sum([p.pow(2).sum() for p in model.parameters()])
@@ -194,32 +208,44 @@ def go(arg):
                     else:
                         testsub = test[random.sample(range(test.size(0)), k=arg.eval_size)]
 
-                    for s, p, ot in tqdm.tqdm(testsub):
-                        s , p, ot = s.item(), p.item(), ot.item()
+                    tseen = 0
+                    for tail in [True, False]: # head or tail prediction
 
-                        raw_candidates = [(s, p, o) for o in range(len(i2n))]
-                        candidates = filter(raw_candidates, alltriples, (s, p, ot))
-                        candidates = torch.tensor(candidates)
+                        for s, p, o in tqdm.tqdm(testsub):
 
-                        # if len(raw_candidates) != len(candidates):
-                        #     print(f'filtered out {len(raw_candidates) - len(candidates)} candidates.')
+                            s, p, o = s.item(), p.item(), o.item()
 
-                        scores = util.batch(model, candidates, batch_size=arg.batch * 2 * (1 + ng))
+                            if tail:
+                                ot = o; del o
 
-                        sorted_candidates = [tuple(p[0]) for p in sorted(zip(candidates.tolist(), scores.tolist()), key=lambda p : -p[1])]
+                                raw_candidates = [(s, p, o) for o in range(len(i2n))]
+                                candidates = filter(raw_candidates, alltriples, (s, p, ot))
 
-                        rank = (sorted_candidates.index((s, p, ot)) + 1)
-                        ranks.append(rank)
+                            else:
+                                st = s; del s
 
-                        hitsat1 += (rank == 1)
-                        hitsat3 += (rank <= 3)
-                        hitsat10 += (rank <= 10)
-                        mrr += 1.0 / rank
+                                raw_candidates = [(s, p, o) for s in range(len(i2n))]
+                                candidates = filter(raw_candidates, alltriples, (st, p, o))
 
-                    mrr = mrr / len(test)
-                    hitsat1 = hitsat1 / len(test)
-                    hitsat3 = hitsat3 / len(test)
-                    hitsat10 = hitsat10 / len(test)
+                            candidates = torch.tensor(candidates)
+                            scores = util.batch(model, candidates, batch_size=arg.batch * 2 * (1 + ng))
+
+                            sorted_candidates = [tuple(p[0]) for p in sorted(zip(candidates.tolist(), scores.tolist()), key=lambda p : -p[1])]
+
+                            rank = (sorted_candidates.index((s, p, ot)) + 1) if tail else (sorted_candidates.index((st, p, o)) + 1)
+                            ranks.append(rank)
+
+                            hitsat1 += (rank == 1)
+                            hitsat3 += (rank <= 3)
+                            hitsat10 += (rank <= 10)
+                            mrr += 1.0 / rank
+
+                            tseen += 1
+
+                    mrr = mrr / tseen
+                    hitsat1 = hitsat1 / tseen
+                    hitsat3 = hitsat3 / tseen
+                    hitsat10 = hitsat10 / tseen
 
                     print(f'epoch {e}: MRR {mrr:.4}\t hits@1 {hitsat1:.4}\t  hits@3 {hitsat3:.4}\t  hits@10 {hitsat10:.4}')
                     print(f'   ranks : {ranks[:10]}')
@@ -274,16 +300,6 @@ if __name__ == "__main__":
                         dest="lr",
                         help="Learning rate",
                         default=0.001, type=float)
-
-    parser.add_argument("--loss",
-                        dest="loss",
-                        help="Loss function (logistic, hinge)",
-                        default='hinge', type=str)
-
-    parser.add_argument("--pairwise",
-                        dest="loss",
-                        help="Apply loss pairwise (if false, loss is applied pointwise)",
-                        action='store_true')
 
     parser.add_argument("-N", "--negative-rate",
                         dest="negative_rate",
@@ -357,6 +373,11 @@ if __name__ == "__main__":
                         dest="opt",
                         help="Optimizer.",
                         default='adamw', type=str)
+
+    parser.add_argument("--loss",
+                        dest="loss",
+                        help="Which loss function to use (bce, ce).",
+                        default='bce', type=str)
 
     parser.add_argument("--conditional", dest="cond",
                         help="Condition on the target node.",
