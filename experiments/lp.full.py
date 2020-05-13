@@ -162,7 +162,7 @@ def go(arg):
                 if arg.loss == 'bce':
                     labels = torch.cat([torch.ones(b, 1), torch.zeros(b, ng)], dim=1)
                 elif arg.loss == 'ce':
-                    labels = torch.zeros(b)
+                    labels = torch.zeros(b, dtype=torch.long)
                     # -- CE loss treats the problem as a multiclass classification problem: for a positive triple,
                     #    together with its k corruptions, identify which is the true triple. This is always triple 0,
                     #    but the score function is order equivariant, so i can't see the index of the triple it's
