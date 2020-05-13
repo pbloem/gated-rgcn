@@ -156,15 +156,15 @@ class LinkPrediction(nn.Module):
     Outputs raw (linear) scores for the given triples.
     """
 
-    def __init__(self, triples, n, r, depth=2, hidden=16, out=16, decomp=None, numbases=None, numblocks=None, decoder='distmult'):
+    def __init__(self, triples, n, r, depth=2, hidden=16, out=16, decomp=None, numbases=None, numblocks=None, decoder='distmult', do=None, init=0.85):
 
         super().__init__()
 
         self.layer0 = self.layer1 = None
 
         if depth == 0:
-            self.embeddings = nn.Parameter(torch.FloatTensor(n, hidden))  # single embedding per node
-            nn.init.xavier_uniform_(self.embeddings, gain=nn.init.calculate_gain('relu'))
+            self.embeddings = nn.Parameter(torch.FloatTensor(n, hidden).uniform_(-init, init))  # single embedding per node
+
         elif depth == 1:
             self.layer0 = RGCNLayer(triples, n, r, insize=None, outsize=out, hor=True,
                                     decomp=decomp, numbases=numbases, numblocks=numblocks)
@@ -178,13 +178,15 @@ class LinkPrediction(nn.Module):
             raise Exception('Not yet implemented.')
 
 
-        self.relations = nn.Parameter(torch.FloatTensor(r, out))
-        nn.init.xavier_uniform_(self.relations, gain=nn.init.calculate_gain('relu'))
+        self.relations = nn.Parameter(torch.FloatTensor(r, out).uniform_(-init, init))
 
         if decoder == 'distmult':
             self.decoder = distmult
         else:
             self.decoder = decoder
+
+
+        self.do = None if do is None else nn.Dropout(do)
 
     def forward(self, triples):
 
@@ -198,7 +200,13 @@ class LinkPrediction(nn.Module):
         if self.layer1 is not None:
             nodes = self.layer1(nodes)
 
-        scores = self.decoder(triples, nodes, self.relations)
+        if self.do is not None:
+            nodes = self.do(nodes)
+            relations = self.do(self.relations)
+        else:
+            relations = self.relations
+
+        scores = self.decoder(triples, nodes, relations)
 
         assert scores.size() == (util.prod(dims), )
 

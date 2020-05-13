@@ -117,7 +117,7 @@ def go(arg):
         if arg.model == 'classic':
             model = kgmodels.LinkPrediction(
                 triples=train, n=len(i2n), r=len(i2r), hidden=arg.emb, out=arg.emb, decomp=arg.decomp,
-                numbases=arg.num_bases, numblocks=arg.num_blocks, depth=arg.depth)
+                numbases=arg.num_bases, numblocks=arg.num_blocks, depth=arg.depth, do=arg.do)
         elif arg.model == 'emb':
             pass
         elif arg.model == 'weighted':
@@ -145,6 +145,8 @@ def go(arg):
             seeni, sumloss = 0, 0.0
 
             for fr in trange(0, train.size(0), arg.batch):
+
+                model.train(True)
 
                 if arg.limit is not None and seeni > arg.limit:
                     break
@@ -198,6 +200,8 @@ def go(arg):
             # Evaluate
             if e % arg.eval_int == 0:
                 with torch.no_grad():
+
+                    model.train(False)
 
                     ranks = []
 
