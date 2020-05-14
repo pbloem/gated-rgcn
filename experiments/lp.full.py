@@ -1,7 +1,7 @@
 from _context import kgmodels
 
 from kgmodels import util
-from util import d
+from util import d, tic, toc
 
 import torch
 
@@ -38,10 +38,9 @@ EPSILON = 0.000000001
 
 global repeats
 
-def corrupt(batch, n):
+def corrupt(batch, n, dv=d()):
     """
     Corrupts the negatives of a batch of triples (in place). The first copy of the triples is uncorrupted
-    TODO: vectorize if this turns out to be a bottleneck
 
     :param batch_size:
     :param n: nr of nodes in the graph
@@ -50,10 +49,15 @@ def corrupt(batch, n):
     """
     bs, ns, _ = batch.size()
 
-    for b in range(bs):
-        for n in range(1, ns):
-            i = random.choice([0, 2]) # index of the part to corrupt
-            batch[b, n, i] = random.choice(range(n))
+    # new entities to insert
+    corruptions = torch.randint(size=(bs * ns,),low=0, high=n, dtype=torch.long, device=dv)
+
+    # boolean mask for entries to corrupt
+    mask = torch.bernoulli(torch.empty(size=(bs, ns, 1), dtype=torch.float, device=dv).fill_(0.5)).to(torch.bool)
+    zeros = torch.zeros(size=(bs, ns, 1), dtype=torch.bool, device=dv)
+    mask = torch.cat([mask, zeros, ~mask], dim=2)
+
+    batch[mask] = corruptions
 
 
 def filter(rawtriples, all, true):
@@ -144,8 +148,10 @@ def go(arg):
 
             seeni, sumloss = 0, 0.0
 
+            tsample, tforward, tbackward, ttotal = 0.0, 0.0, 0.0, 0.0
             for fr in trange(0, train.size(0), arg.batch):
 
+                tic()
                 model.train(True)
 
                 if arg.limit is not None and seeni > arg.limit:
@@ -157,9 +163,22 @@ def go(arg):
 
                 b, _ = positives.size()
 
+                tic()
+
                 # sample negatives
-                triples = positives[:, None, :].expand(b, ng + 1, 3).contiguous()
+                if arg.corrupt_global: # global corruption (sample random true triples to corrupt)
+                    indices = torch.randint(size=(b*ng,), low=0, high=train.size(0))
+                    negatives = train[indices, :].view(b, ng, 3) # -- triples to be corrupted
+                    triples = torch.cat([positives[:, None, :], negatives], dim=1)
+
+                else: # local corruption (directly corrupt the current batch)
+                    triples = positives[:, None, :].expand(b, ng + 1, 3).contiguous()
+
+                if torch.cuda.is_available():
+                    triples = triples.cuda()
+
                 corrupt(triples, len(i2n))
+
 
                 if arg.loss == 'bce':
                     labels = torch.cat([torch.ones(b, 1), torch.zeros(b, ng)], dim=1)
@@ -171,11 +190,15 @@ def go(arg):
                     #    classifying.
 
                 if torch.cuda.is_available():
-                    triples, labels = triples.cuda(), labels.cuda()
+                    labels = labels.cuda()
+
+                tsample += toc()
 
                 opt.zero_grad()
 
+                tic()
                 out = model(triples)
+                tforward += toc()
 
                 assert out.size() == (b, ng + 1)
 
@@ -188,14 +211,18 @@ def go(arg):
                     l2 = sum([p.pow(2).sum() for p in model.parameters()])
                     loss = loss + arg.l2weight * l2
 
+                tic()
                 loss.backward()
+                tbackward += toc()
+
                 sumloss += float(loss.item())
 
                 opt.step()
 
                 seen += b; seeni += b
+                ttotal += toc()
 
-            print(f'epoch {e}; training loss {sumloss/seeni:.4}')
+            print(f'epoch {e}; training loss {sumloss/seeni:.4}       s {tsample:.4}s, f {tforward:.2}s, b {tbackward:.2}, t {ttotal:.2}s')
 
             # Evaluate
             if e % arg.eval_int == 0:
@@ -407,8 +434,8 @@ if __name__ == "__main__":
                         help="Prune the graph to remove irrelevant links.",
                         action="store_true")
 
-    parser.add_argument("--sample", dest="sample",
-                        help="Subsample the graph according to the weights.",
+    parser.add_argument("--corrupt-global", dest="corrupt_global",
+                        help="If not set, corrupts the current batch as negative samples. If set, samples triples globally to corrupt.",
                         action="store_true")
 
     options = parser.parse_args()
