@@ -140,14 +140,9 @@ def distmult(triples, nodes, relations):
     """
 
     b, _ = triples.size()
-    # n, k = nodes.size()
-    # r, k = relations.size()
 
     s, p, o = triples[:, 0], triples[:, 1], triples[:, 2]
-    if type(nodes) == nn.Embedding:
-        s, p, o = nodes(s), relations(p), nodes(o)
-    else:
-        s, p, o = nodes[s, :], relations[p, :], nodes[o, :]
+    s, p, o = nodes[s, :], relations[p, :], nodes[o, :]
 
     return (s * p * o).sum(dim=1)
 
@@ -166,9 +161,7 @@ class LinkPrediction(nn.Module):
         self.layer0 = self.layer1 = None
 
         if depth == 0:
-            #self.embeddings = nn.Parameter(torch.FloatTensor(n, hidden).uniform_(-init, init))  # single embedding per node
-            self.embeddings = nn.Embedding(n, hidden, sparse=sparse)
-            self.embeddings.weight.data.uniform_(-init, init)
+            self.embeddings = nn.Parameter(torch.FloatTensor(n, hidden).uniform_(-init, init))  # single embedding per node
 
         elif depth == 1:
             self.layer0 = RGCNLayer(triples, n, r, insize=None, outsize=out, hor=True,
@@ -182,9 +175,7 @@ class LinkPrediction(nn.Module):
         else:
             raise Exception('Not yet implemented.')
 
-        # self.relations = nn.Parameter(torch.FloatTensor(r, out).uniform_(-init, init))
-        self.relations = nn.Embedding(n, hidden, sparse=sparse)
-        self.relations.weight.data.uniform_(-init, init)
+        self.relations = nn.Parameter(torch.FloatTensor(r, out).uniform_(-init, init))
 
         if decoder == 'distmult':
             self.decoder = distmult

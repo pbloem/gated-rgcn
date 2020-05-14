@@ -133,9 +133,7 @@ def go(arg):
             prt('Using CUDA.')
             model.cuda()
 
-        if arg.sparse:
-            opt = torch.optim.SparseAdam(model.parameters(), lr=arg.lr)
-        elif arg.opt == 'adam':
+        if arg.opt == 'adam':
             opt = torch.optim.Adam(model.parameters(), lr=arg.lr, weight_decay=arg.wd)
         elif arg.opt == 'adamw':
             opt = torch.optim.AdamW(model.parameters(), lr=arg.lr, weight_decay=arg.wd)
@@ -443,10 +441,6 @@ if __name__ == "__main__":
 
     parser.add_argument("--corrupt-global", dest="corrupt_global",
                         help="If not set, corrupts the current batch as negative samples. If set, samples triples globally to corrupt.",
-                        action="store_true")
-
-    parser.add_argument("--sparse", dest="sparse",
-                        help="Spare gradients for the embeddings.",
                         action="store_true")
 
     options = parser.parse_args()
