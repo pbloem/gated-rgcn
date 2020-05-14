@@ -121,7 +121,7 @@ def go(arg):
         if arg.model == 'classic':
             model = kgmodels.LinkPrediction(
                 triples=train, n=len(i2n), r=len(i2r), hidden=arg.emb, out=arg.emb, decomp=arg.decomp,
-                numbases=arg.num_bases, numblocks=arg.num_blocks, depth=arg.depth, do=arg.do)
+                numbases=arg.num_bases, numblocks=arg.num_blocks, depth=arg.depth, do=arg.do, sparse=arg.sparse)
         elif arg.model == 'emb':
             pass
         elif arg.model == 'weighted':
@@ -133,7 +133,9 @@ def go(arg):
             prt('Using CUDA.')
             model.cuda()
 
-        if arg.opt == 'adam':
+        if arg.sparse:
+            opt = torch.optim.SparseAdam(model.parameters(), lr=arg.lr)
+        elif arg.opt == 'adam':
             opt = torch.optim.Adam(model.parameters(), lr=arg.lr, weight_decay=arg.wd)
         elif arg.opt == 'adamw':
             opt = torch.optim.AdamW(model.parameters(), lr=arg.lr, weight_decay=arg.wd)
@@ -148,7 +150,7 @@ def go(arg):
 
             seeni, sumloss = 0, 0.0
 
-            tsample, tforward, tbackward, ttotal = 0.0, 0.0, 0.0, 0.0
+            tsample, tforward, tbackward, ttotal, tloss = 0.0, 0.0, 0.0, 0.0, 0.0
             for fr in trange(0, train.size(0), arg.batch):
 
                 tic()
@@ -198,10 +200,10 @@ def go(arg):
 
                 tic()
                 out = model(triples)
-                tforward += toc()
 
                 assert out.size() == (b, ng + 1)
 
+                tic()
                 if arg.loss == 'bce':
                     loss = F.binary_cross_entropy_with_logits(out, labels)
                 elif arg.loss == 'ce':
@@ -210,6 +212,11 @@ def go(arg):
                 if arg.l2weight is not None:
                     l2 = sum([p.pow(2).sum() for p in model.parameters()])
                     loss = loss + arg.l2weight * l2
+
+                tloss += toc()
+
+                tforward += toc()
+
 
                 tic()
                 loss.backward()
@@ -222,7 +229,7 @@ def go(arg):
                 seen += b; seeni += b
                 ttotal += toc()
 
-            print(f'epoch {e}; training loss {sumloss/seeni:.4}       s {tsample:.4}s, f {tforward:.2}s, b {tbackward:.2}, t {ttotal:.2}s')
+            print(f'epoch {e}; training loss {sumloss/seeni:.4}       s {tsample:.3}s, f {tforward:.3}s (loss {tloss:.3}s), b {tbackward:.3}, t {ttotal:.3}s')
 
             # Evaluate
             if e % arg.eval_int == 0:
@@ -436,6 +443,10 @@ if __name__ == "__main__":
 
     parser.add_argument("--corrupt-global", dest="corrupt_global",
                         help="If not set, corrupts the current batch as negative samples. If set, samples triples globally to corrupt.",
+                        action="store_true")
+
+    parser.add_argument("--sparse", dest="sparse",
+                        help="Spare gradients for the embeddings.",
                         action="store_true")
 
     options = parser.parse_args()
