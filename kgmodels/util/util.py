@@ -513,7 +513,7 @@ def block_diag(m):
     if type(m) is list:
         m = torch.cat([m1.unsqueeze(-3) for m1 in m], -3)
 
-    d = m.dim()
+    dim = m.dim()
     n = m.shape[-3]
 
     siz0 = m.shape[:-3]
@@ -521,7 +521,7 @@ def block_diag(m):
 
     m2 = m.unsqueeze(-2)
 
-    eye = attach_dim(torch.eye(n, device=d(m)).unsqueeze(-2), d - 3, 1)
+    eye = attach_dim(torch.eye(n, device=d(m)).unsqueeze(-2), dim - 3, 1)
 
     return (m2 * eye).reshape(
         siz0 + torch.Size(torch.tensor(siz1) * n)
