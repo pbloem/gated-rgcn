@@ -159,38 +159,38 @@ def go(arg):
 
                 to = min(train.size(0), fr + arg.batch)
 
-                positives = train[fr:to]
+                with torch.no_grad():
+                    positives = train[fr:to]
 
-                b, _ = positives.size()
+                    b, _ = positives.size()
 
-                tic()
+                    tic()
 
-                # sample negatives
-                if arg.corrupt_global: # global corruption (sample random true triples to corrupt)
-                    indices = torch.randint(size=(b*ng,), low=0, high=train.size(0))
-                    negatives = train[indices, :].view(b, ng, 3) # -- triples to be corrupted
-                    triples = torch.cat([positives[:, None, :], negatives], dim=1)
+                    # sample negatives
+                    if arg.corrupt_global: # global corruption (sample random true triples to corrupt)
+                        indices = torch.randint(size=(b*ng,), low=0, high=train.size(0))
+                        negatives = train[indices, :].view(b, ng, 3) # -- triples to be corrupted
+                        triples = torch.cat([positives[:, None, :], negatives], dim=1)
 
-                else: # local corruption (directly corrupt the current batch)
-                    triples = positives[:, None, :].expand(b, ng + 1, 3).contiguous()
+                    else: # local corruption (directly corrupt the current batch)
+                        triples = positives[:, None, :].expand(b, ng + 1, 3).contiguous()
 
-                if torch.cuda.is_available():
-                    triples = triples.cuda()
+                    if torch.cuda.is_available():
+                        triples = triples.cuda()
 
-                corrupt(triples, len(i2n))
+                    corrupt(triples, len(i2n))
 
+                    if arg.loss == 'bce':
+                        labels = torch.cat([torch.ones(b, 1), torch.zeros(b, ng)], dim=1)
+                    elif arg.loss == 'ce':
+                        labels = torch.zeros(b, dtype=torch.long)
+                        # -- CE loss treats the problem as a multiclass classification problem: for a positive triple,
+                        #    together with its k corruptions, identify which is the true triple. This is always triple 0,
+                        #    but the score function is order equivariant, so i can't see the index of the triple it's
+                        #    classifying.
 
-                if arg.loss == 'bce':
-                    labels = torch.cat([torch.ones(b, 1), torch.zeros(b, ng)], dim=1)
-                elif arg.loss == 'ce':
-                    labels = torch.zeros(b, dtype=torch.long)
-                    # -- CE loss treats the problem as a multiclass classification problem: for a positive triple,
-                    #    together with its k corruptions, identify which is the true triple. This is always triple 0,
-                    #    but the score function is order equivariant, so i can't see the index of the triple it's
-                    #    classifying.
-
-                if torch.cuda.is_available():
-                    labels = labels.cuda()
+                    if torch.cuda.is_available():
+                        labels = labels.cuda()
 
                 tsample += toc()
 
