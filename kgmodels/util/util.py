@@ -521,7 +521,7 @@ def block_diag(m):
 
     m2 = m.unsqueeze(-2)
 
-    eye = attach_dim(torch.eye(n).unsqueeze(-2), d - 3, 1)
+    eye = attach_dim(torch.eye(n, device=d(m)).unsqueeze(-2), d - 3, 1)
 
     return (m2 * eye).reshape(
         siz0 + torch.Size(torch.tensor(siz1) * n)
