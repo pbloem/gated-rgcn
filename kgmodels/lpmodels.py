@@ -141,8 +141,13 @@ def distmult(triples, nodes, relations):
 
     b, _ = triples.size()
 
-    s, p, o = triples[:, 0], triples[:, 1], triples[:, 2]
-    s, p, o = nodes[s, :], relations[p, :], nodes[o, :]
+    # s, p, o = triples[:, 0], triples[:, 1], triples[:, 2]
+    # s, p, o = nodes[s, :], relations[p, :], nodes[o, :]
+
+    # faster?
+    s = nodes.index_select(dim=0,     index=triples[:, 0])
+    p = relations.index_select(dim=0, index=triples[:, 1])
+    o = nodes.index_select(dim=0,     index=triples[:, 2])
 
     return (s * p * o).sum(dim=1)
 
