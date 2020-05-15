@@ -148,7 +148,7 @@ def go(arg):
 
             seeni, sumloss = 0, 0.0
 
-            tsample, tforward, tbackward, ttotal, tloss = 0.0, 0.0, 0.0, 0.0, 0.0
+            tsample, tforward, tbackward, ttotal, tloss, tstep = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
             for fr in trange(0, train.size(0), arg.batch):
 
                 tic()
@@ -215,19 +215,20 @@ def go(arg):
 
                 tforward += toc()
 
-
                 tic()
                 loss.backward()
                 tbackward += toc()
 
                 sumloss += float(loss.item())
 
+                tic()
                 opt.step()
+                tstep += toc()
 
                 seen += b; seeni += b
                 ttotal += toc()
 
-            print(f'epoch {e}; training loss {sumloss/seeni:.4}       s {tsample:.3}s, f {tforward:.3}s (loss {tloss:.3}s), b {tbackward:.3}, t {ttotal:.3}s')
+            print(f'epoch {e}; training loss {sumloss/seeni:.4}       s {tsample:.3}s, f {tforward:.3}s (loss {tloss:.3}s), b {tbackward:.3}, st {tstep:.3}, t {ttotal:.3}s')
 
             # Evaluate
             if e % arg.eval_int == 0:
