@@ -38,7 +38,7 @@ EPSILON = 0.000000001
 
 global repeats
 
-def corrupt(batch, n, dv=d()):
+def corrupt(batch, n):
     """
     Corrupts the negatives of a batch of triples (in place). The first copy of the triples is uncorrupted
 
@@ -50,15 +50,14 @@ def corrupt(batch, n, dv=d()):
     bs, ns, _ = batch.size()
 
     # new entities to insert
-    corruptions = torch.randint(size=(bs * ns,),low=0, high=n, dtype=torch.long, device=dv)
+    corruptions = torch.randint(size=(bs * ns,),low=0, high=n, dtype=torch.long, device=d(batch))
 
     # boolean mask for entries to corrupt
-    mask = torch.bernoulli(torch.empty(size=(bs, ns, 1), dtype=torch.float, device=dv).fill_(0.5)).to(torch.bool)
-    zeros = torch.zeros(size=(bs, ns, 1), dtype=torch.bool, device=dv)
+    mask = torch.bernoulli(torch.empty(size=(bs, ns, 1), dtype=torch.float, device=d(batch)).fill_(0.5)).to(torch.bool)
+    zeros = torch.zeros(size=(bs, ns, 1), dtype=torch.bool, device=d(batch))
     mask = torch.cat([mask, zeros, ~mask], dim=2)
 
     batch[mask] = corruptions
-
 
 def filter(rawtriples, all, true):
     filtered = []
@@ -170,15 +169,16 @@ def go(arg):
                     if arg.corrupt_global: # global corruption (sample random true triples to corrupt)
                         indices = torch.randint(size=(b*ng,), low=0, high=train.size(0))
                         negatives = train[indices, :].view(b, ng, 3) # -- triples to be corrupted
-                        triples = torch.cat([positives[:, None, :], negatives], dim=1)
 
                     else: # local corruption (directly corrupt the current batch)
-                        triples = positives[:, None, :].expand(b, ng + 1, 3).contiguous()
+                        negatives = positives[:, None, :].expand(b, ng, 3).contiguous()
+
+                    corrupt(negatives, len(i2n))
+
+                    triples = torch.cat([positives[:, None, :], negatives], dim=1)
 
                     if torch.cuda.is_available():
                         triples = triples.cuda()
-
-                    corrupt(triples, len(i2n))
 
                     if arg.loss == 'bce':
                         labels = torch.cat([torch.ones(b, 1), torch.zeros(b, ng)], dim=1)
@@ -231,7 +231,7 @@ def go(arg):
             print(f'epoch {e}; training loss {sumloss/seeni:.4}       s {tsample:.3}s, f {tforward:.3}s (loss {tloss:.3}s), b {tbackward:.3}, st {tstep:.3}, t {ttotal:.3}s')
 
             # Evaluate
-            if e % arg.eval_int == 0:
+            if (e % arg.eval_int == 0 and e !=0) or e == arg.epochs - 1:
                 with torch.no_grad():
 
                     model.train(False)
