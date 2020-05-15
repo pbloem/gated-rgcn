@@ -141,13 +141,15 @@ def distmult(triples, nodes, relations):
 
     b, _ = triples.size()
 
-    # s, p, o = triples[:, 0], triples[:, 1], triples[:, 2]
+    with torch.no_grad():
+        s, p, o = triples[:, 0], triples[:, 1], triples[:, 2]
+
     # s, p, o = nodes[s, :], relations[p, :], nodes[o, :]
 
     # faster?
-    s = nodes.index_select(dim=0,     index=triples[:, 0])
-    p = relations.index_select(dim=0, index=triples[:, 1])
-    o = nodes.index_select(dim=0,     index=triples[:, 2])
+    s = nodes.index_select(dim=0,     index=s)
+    p = relations.index_select(dim=0, index=p)
+    o = nodes.index_select(dim=0,     index=o)
 
     return (s * p * o).sum(dim=1)
 
