@@ -1,6 +1,6 @@
 import torch, os, sys
 
-from torch import nn
+from torch import nn, Tensor
 import torch.nn.functional as F
 import torch.distributions as ds
 
@@ -154,7 +154,7 @@ class LinkPrediction(nn.Module):
     Outputs raw (linear) scores for the given triples.
     """
 
-    def __init__(self, triples, n, r, depth=2, hidden=16, out=16, decomp=None, numbases=None, numblocks=None, decoder='distmult', do=None, init=0.85, sparse=False):
+    def __init__(self, triples, n, r, depth=2, hidden=16, out=16, decomp=None, numbases=None, numblocks=None, decoder='distmult', do=None, init=0.85):
 
         super().__init__()
 
@@ -184,6 +184,9 @@ class LinkPrediction(nn.Module):
 
 
         self.do = None if do is None else nn.Dropout(do)
+
+    def register_buffer(self, name: str, tensor: Tensor) -> None:
+        super().register_buffer(name, tensor)
 
     def forward(self, triples):
 
