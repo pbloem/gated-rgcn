@@ -26,7 +26,7 @@ class RGCNLayer(nn.Module):
         self.hor = hor
 
         # horizontally and vertically stacked versions of the adjacency graph
-        # (the vertical is always necessary to normalize the adjacencies
+        # (the vertical is always necessary to normalize the adjacencies)
         if hor:
             hor_ind, hor_size = util.adj_triples(triples, n, r, vertical=False)
 
@@ -129,7 +129,7 @@ class RGCNLayer(nn.Module):
         return out + self.bias
 
 
-def distmult(triples, nodes, relations):
+def distmult(triples, nodes, relations, biases=None):
     """
     Implements the distmult score function.
 
@@ -142,16 +142,21 @@ def distmult(triples, nodes, relations):
     b, _ = triples.size()
 
     with torch.no_grad():
-        s, p, o = triples[:, 0], triples[:, 1], triples[:, 2]
+        si, pi, oi = triples[:, 0], triples[:, 1], triples[:, 2]
 
     # s, p, o = nodes[s, :], relations[p, :], nodes[o, :]
 
     # faster?
-    s = nodes.index_select(dim=0,     index=s)
-    p = relations.index_select(dim=0, index=p)
-    o = nodes.index_select(dim=0,     index=o)
+    s = nodes.index_select(dim=0,     index=si)
+    p = relations.index_select(dim=0, index=pi)
+    o = nodes.index_select(dim=0,     index=oi)
 
-    return (s * p * o).sum(dim=1)
+    if biases is None:
+        return (s * p * o).sum(dim=1)
+
+    gb, sb, pb, ob = biases
+
+    return (s * p * o).sum(dim=1) + sb[si] + pb[pi] + ob[oi] + gb
 
 
 class LinkPrediction(nn.Module):
@@ -161,7 +166,7 @@ class LinkPrediction(nn.Module):
     Outputs raw (linear) scores for the given triples.
     """
 
-    def __init__(self, triples, n, r, depth=2, hidden=16, out=16, decomp=None, numbases=None, numblocks=None, decoder='distmult', do=None, init=0.85):
+    def __init__(self, triples, n, r, depth=2, hidden=16, out=16, decomp=None, numbases=None, numblocks=None, decoder='distmult', do=None, init=0.85, biases=False):
 
         super().__init__()
 
@@ -192,6 +197,14 @@ class LinkPrediction(nn.Module):
 
         self.do = None if do is None else nn.Dropout(do)
 
+        self.biases = biases
+        if biases:
+
+            self.gbias = nn.Parameter(torch.zeros((1,)))
+            self.sbias = nn.Parameter(torch.zeros((n,)))
+            self.pbias = nn.Parameter(torch.zeros((r,)))
+            self.obias = nn.Parameter(torch.zeros((n,)))
+
     def register_buffer(self, name: str, tensor: Tensor) -> None:
         super().register_buffer(name, tensor)
 
@@ -213,7 +226,12 @@ class LinkPrediction(nn.Module):
         else:
             relations = self.relations
 
-        scores = self.decoder(triples, nodes, relations)
+        if self.biases:
+            biases = (self.gbias, self.sbias, self.pbias, self.obias)
+        else:
+            biases = None
+
+        scores = self.decoder(triples, nodes, relations, biases=biases)
 
         assert scores.size() == (util.prod(dims), )
 

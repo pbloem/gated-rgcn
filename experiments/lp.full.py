@@ -120,7 +120,7 @@ def go(arg):
         if arg.model == 'classic':
             model = kgmodels.LinkPrediction(
                 triples=train, n=len(i2n), r=len(i2r), hidden=arg.emb, out=arg.emb, decomp=arg.decomp,
-                numbases=arg.num_bases, numblocks=arg.num_blocks, depth=arg.depth, do=arg.do)
+                numbases=arg.num_bases, numblocks=arg.num_blocks, depth=arg.depth, do=arg.do, biases=arg.biases)
         elif arg.model == 'emb':
             pass
         elif arg.model == 'weighted':
@@ -156,9 +156,8 @@ def go(arg):
                 if arg.limit is not None and seeni > arg.limit:
                     break
 
-                if torch.cuda.is_available() and random.random() < 0.01:
-                    print(f'\nPeak gpu memory use is {torch.cuda.max_memory_cached() / 1e9:.2} Gb')
-
+                # if torch.cuda.is_available() and random.random() < 0.01:
+                #     print(f'\nPeak gpu memory use is {torch.cuda.max_memory_cached() / 1e9:.2} Gb')
 
                 to = min(train.size(0), fr + arg.batch)
 
@@ -446,6 +445,10 @@ if __name__ == "__main__":
 
     parser.add_argument("--corrupt-global", dest="corrupt_global",
                         help="If not set, corrupts the current batch as negative samples. If set, samples triples globally to corrupt.",
+                        action="store_true")
+
+    parser.add_argument("--biases", dest="biases",
+                        help="Learn bias parameters.",
                         action="store_true")
 
     options = parser.parse_args()
