@@ -70,7 +70,7 @@ class RGCNLayer(nn.Module):
             # -- block decomposition
 
             assert numblocks is not None
-            assert h0 % numblocks == 0 and h1 % numblocks == 0
+            assert h0 % numblocks == 0 and h1 % numblocks == 0, f'{h0} {h1} '
 
             self.blocks = nn.Parameter(torch.FloatTensor(r, numblocks, h0 // numblocks, h1 // numblocks))
             nn.init.xavier_uniform_(self.blocks, gain=nn.init.calculate_gain('relu'))
