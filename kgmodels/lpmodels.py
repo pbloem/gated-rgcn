@@ -100,9 +100,6 @@ class RGCNLayer(nn.Module):
         else:
             self.adj = torch.sparse.FloatTensor(indices=ver_ind.t(), values=vals, size=ver_size, device=d(triples))
 
-        print(triples.is_cuda, self.adj.is_cuda)
-        sys.exit()
-
         ## Perform message passing
         assert (nodes is None) == (self.insize is None)
 
@@ -292,6 +289,9 @@ class LinkPrediction(nn.Module):
             triples = torch.tensor(list(triples), device=d(self.all_triples))
             with torch.no_grad():
                 triples = add_inverse_and_self(triples, n, r)
+
+            print(self.all_triples.is_cuda, triples.is_cuda)
+            sys.exit()
         else:
             triples = self.all_triples_plus # just use all triples
 
