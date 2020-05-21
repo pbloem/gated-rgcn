@@ -85,22 +85,17 @@ class RGCNLayer(nn.Module):
 
         # horizontally and vertically stacked versions of the adjacency graph
         # (the vertical is always necessary to normalize the adjacencies)
-        tic()
 
         if self.hor:
             hor_ind, hor_size = util.adj_triples_tensor(triples, n, r, vertical=False)
 
-        tic()
         ver_ind, ver_size = util.adj_triples_tensor(triples, n, r, vertical=True)
-        print('--adj_triples', toc())
 
         rn, _ = ver_size
 
         # compute values of row-normalized adjacency matrices (same for hor and ver)
-        tic()
         vals = torch.ones(ver_ind.size(0), dtype=torch.float, device=d(triples))
         vals = vals / util.sum_sparse(ver_ind, vals, ver_size)
-        print('--normalize', toc())
 
         if self.hor:
             self.adj = torch.sparse.FloatTensor(indices=hor_ind.t(), values=vals, size=hor_size)
@@ -109,9 +104,6 @@ class RGCNLayer(nn.Module):
 
         if triples.is_cuda:
             self.adj = self.adj.to('cuda')
-
-        print('create adj', toc())
-        tic()
 
         ## Perform message passing
         assert (nodes is None) == (self.insize is None)
@@ -131,9 +123,6 @@ class RGCNLayer(nn.Module):
 
         assert weights.size() == (r, h0, h1)
 
-        print('prep weights', toc())
-
-        tic()
         if self.insize is None:
             # -- input is the identity matrix, just multiply the weights by the adjacencies
             out = torch.mm(self.adj, weights.view(r*h0, h1))
@@ -149,8 +138,6 @@ class RGCNLayer(nn.Module):
             out = torch.mm(self.adj, nodes)  # sparse mm
             out = out.view(r, n, h0)  # new dim for the relations
             out = torch.einsum('rio, rni -> no', weights, out)
-
-        print('mult', toc())
 
         assert out.size() == (n, h1)
 
@@ -275,7 +262,6 @@ class LinkPrediction(nn.Module):
 
     def forward(self, batch):
 
-        tic()
 
         assert batch.size(-1) == 3
 
@@ -284,8 +270,6 @@ class LinkPrediction(nn.Module):
         dims = batch.size()[:-1]
         batch = batch.reshape(-1, 3)
         batchl = batch.tolist()
-
-        tic()
 
         if self.prune and self.depth > 0:
             # gather all triples that are relevant to the current batch
@@ -314,11 +298,8 @@ class LinkPrediction(nn.Module):
         else:
             triples = self.all_triples_plus # just use all triples
 
-        print('gather triples', toc())
-
         nodes = self.embeddings if self.layer0 is None else self.layer0(triples=triples)
 
-        tic()
         if self.layer1 is not None:
             nodes = self.layer1(triples=triples, nodes=nodes)
 
@@ -328,21 +309,14 @@ class LinkPrediction(nn.Module):
         else:
             relations = self.relations
 
-        print('all message passing', toc())
-
         if self.biases:
             biases = (self.gbias, self.sbias, self.pbias, self.obias)
         else:
             biases = None
 
-        tic()
         scores = self.decoder(batch, nodes, relations, biases=biases)
-        print('decoder', toc())
-
 
         assert scores.size() == (util.prod(dims), )
-
-        print('TOTAL', toc())
 
         return scores.view(*dims)
 

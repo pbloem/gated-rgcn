@@ -110,8 +110,6 @@ def adj_triples(triples, num_nodes, num_rels, cuda=False, vertical=True):
     from_indices = []
     upto_indices = []
 
-    tic()
-
     for fr, rel, to in triples:
 
         offset = rel.item() * n
@@ -124,11 +122,8 @@ def adj_triples(triples, num_nodes, num_rels, cuda=False, vertical=True):
         from_indices.append(fr)
         upto_indices.append(to)
 
-    print('--- loop', toc())
-
     tic()
     indices = torch.tensor([from_indices, upto_indices], dtype=torch.long, device=d(cuda))
-    print('--- create', toc())
 
     assert indices.size(1) == len(triples)
     assert indices[0, :].max() < size[0], f'{indices[0, :].max()}, {size}, {r}'
@@ -151,8 +146,6 @@ def adj_triples_tensor(triples, num_nodes, num_rels, vertical=True):
     r, n = num_rels, num_nodes
     size = (r*n, n) if vertical else (n, r*n)
 
-    tic()
-
     fr, to = triples[:, 0], triples[:, 2]
     offset = triples[:, 1] * n
     if vertical:
@@ -160,11 +153,7 @@ def adj_triples_tensor(triples, num_nodes, num_rels, vertical=True):
     else:
         to = offset + to
 
-    print('--- "loop"', toc())
-
-    tic()
     indices = torch.cat([fr[:, None], to[:, None]], dim=1)
-    print('--- concat', toc())
 
     assert indices.size(0) == triples.size(0)
     assert indices[:, 0].max() < size[0], f'{indices[0, :].max()}, {size}, {r}'
