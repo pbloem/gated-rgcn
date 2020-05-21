@@ -103,9 +103,6 @@ class RGCNLayer(nn.Module):
         if triples.is_cuda:
             self.adj = self.adj.to('cuda')
 
-        print(triples.is_cuda, self.adj.is_cuda)
-        sys.exit()
-
         ## Perform message passing
         assert (nodes is None) == (self.insize is None)
 
