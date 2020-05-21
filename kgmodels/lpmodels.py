@@ -96,11 +96,9 @@ class RGCNLayer(nn.Module):
         vals = vals / util.sum_sparse(ver_ind, vals, ver_size)
 
         if self.hor:
-            hor_graph = torch.sparse.FloatTensor(indices=hor_ind.t(), values=vals, size=hor_size)
-            self.register_buffer('adj', hor_graph)
+            self.adj = torch.sparse.FloatTensor(indices=hor_ind.t(), values=vals, size=hor_size, device=d(triples))
         else:
-            ver_graph = torch.sparse.FloatTensor(indices=ver_ind.t(), values=vals, size=ver_size)
-            self.register_buffer('adj', ver_graph)
+            self.adj = torch.sparse.FloatTensor(indices=ver_ind.t(), values=vals, size=ver_size, device=d(triples))
 
         ## Perform message passing
         assert (nodes is None) == (self.insize is None)
