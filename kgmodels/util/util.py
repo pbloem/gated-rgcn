@@ -126,7 +126,9 @@ def adj_triples(triples, num_nodes, num_rels, cuda=False, vertical=True):
 
     print('--- loop', toc())
 
+    tic()
     indices = torch.tensor([from_indices, upto_indices], dtype=torch.long, device=d(cuda))
+    print('--- create', toc())
 
     assert indices.size(1) == len(triples)
     assert indices[0, :].max() < size[0], f'{indices[0, :].max()}, {size}, {r}'
