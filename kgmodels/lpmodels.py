@@ -7,7 +7,7 @@ import torch.distributions as ds
 from math import sqrt, ceil
 
 import layers, util
-from util import d
+from util import d, tic, toc
 
 import torch as T
 
@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 
 class RGCNLayer(nn.Module):
 
-    def __init__(self, n, r, insize=None, outsize=16, decomp=None, hor=True, numbases=None, numblocks=None):
+    def __init__(self, n, r, insize=None, outsize=16, decomp=None, hor=True, numbases=None, numblocks=None, dropout=None()):
         """
 
         :param n:
@@ -95,6 +95,8 @@ class RGCNLayer(nn.Module):
         vals = torch.ones(ver_ind.size(0), dtype=torch.float)
         vals = vals / util.sum_sparse(ver_ind, vals, ver_size)
 
+        tic()
+
         if self.hor:
             self.adj = torch.sparse.FloatTensor(indices=hor_ind.t(), values=vals, size=hor_size)
         else:
@@ -102,6 +104,8 @@ class RGCNLayer(nn.Module):
 
         if triples.is_cuda:
             self.adj = self.adj.to('cuda')
+
+        print('create adj', toc)
 
         ## Perform message passing
         assert (nodes is None) == (self.insize is None)
@@ -121,6 +125,7 @@ class RGCNLayer(nn.Module):
 
         assert weights.size() == (r, h0, h1)
 
+        tic()
         if self.insize is None:
             # -- input is the identity matrix, just multiply the weights by the adjacencies
             out = torch.mm(self.adj, weights.view(r*h0, h1))
@@ -136,6 +141,8 @@ class RGCNLayer(nn.Module):
             out = torch.mm(self.adj, nodes)  # sparse mm
             out = out.view(r, n, h0)  # new dim for the relations
             out = torch.einsum('rio, rni -> no', weights, out)
+
+        print('mult', toc())
 
         assert out.size() == (n, h1)
 
@@ -256,9 +263,6 @@ class LinkPrediction(nn.Module):
             self.pbias = nn.Parameter(torch.zeros((r,)))
             self.obias = nn.Parameter(torch.zeros((n,)))
 
-    def register_buffer(self, name: str, tensor: Tensor) -> None:
-        super().register_buffer(name, tensor)
-
     def forward(self, batch):
 
         assert batch.size(-1) == 3
@@ -268,6 +272,8 @@ class LinkPrediction(nn.Module):
         dims = batch.size()[:-1]
         batch = batch.reshape(-1, 3)
         batchl = batch.tolist()
+
+        tic()
 
         if self.prune and self.depth > 0:
             # gather all triples that are relevant to the current batch
@@ -296,8 +302,11 @@ class LinkPrediction(nn.Module):
         else:
             triples = self.all_triples_plus # just use all triples
 
+        print('gather triples', toc())
+
         nodes = self.embeddings if self.layer0 is None else self.layer0(triples=triples)
 
+        tic()
         if self.layer1 is not None:
             nodes = self.layer1(triples=triples, nodes=nodes)
 
@@ -306,6 +315,8 @@ class LinkPrediction(nn.Module):
             relations = self.do(self.relations)
         else:
             relations = self.relations
+
+        print('all message passing', toc())
 
         if self.biases:
             biases = (self.gbias, self.sbias, self.pbias, self.obias)
