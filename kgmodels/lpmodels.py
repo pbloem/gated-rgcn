@@ -95,10 +95,12 @@ class RGCNLayer(nn.Module):
         vals = torch.ones(ver_ind.size(0), dtype=torch.float)
         vals = vals / util.sum_sparse(ver_ind, vals, ver_size)
 
+
+        FT = torch.cuda.sparse.FloatTensor if triples.is_cuda else torch.sparse.FloatTensor
         if self.hor:
-            self.adj = torch.sparse.FloatTensor(indices=hor_ind.t(), values=vals, size=hor_size, device=d(triples))
+            self.adj = FT(indices=hor_ind.t(), values=vals, size=hor_size)
         else:
-            self.adj = torch.sparse.FloatTensor(indices=ver_ind.t(), values=vals, size=ver_size, device=d(triples))
+            self.adj = FT(indices=ver_ind.t(), values=vals, size=ver_size)
 
         ## Perform message passing
         assert (nodes is None) == (self.insize is None)
