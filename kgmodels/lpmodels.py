@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 
 class RGCNLayer(nn.Module):
 
-    def __init__(self, n, r, insize=None, outsize=16, decomp=None, hor=True, numbases=None, numblocks=None, dropout=None()):
+    def __init__(self, n, r, insize=None, outsize=16, decomp=None, hor=True, numbases=None, numblocks=None):
         """
 
         :param n:
