@@ -19,6 +19,17 @@ import matplotlib.pyplot as plt
 class RGCNLayer(nn.Module):
 
     def __init__(self, n, r, insize=None, outsize=16, decomp=None, hor=True, numbases=None, numblocks=None):
+        """
+
+        :param n:
+        :param r:
+        :param insize: size of the input. None if the input is one-hot vectors
+        :param outsize:
+        :param decomp:
+        :param hor:
+        :param numbases:
+        :param numblocks:
+        """
 
         super().__init__()
 
@@ -80,7 +91,6 @@ class RGCNLayer(nn.Module):
 
             ver_ind, ver_size = util.adj_triples(triples, n, r, vertical=True)
             rn, _ = ver_size
-            r = rn // n
 
             # compute values of row-normalized adjacency matrices (same for hor and ver)
             vals = torch.ones(ver_ind.size(0), dtype=torch.float)
@@ -95,15 +105,6 @@ class RGCNLayer(nn.Module):
 
         ## Perform message passing
         assert (nodes is None) == (self.insize is None)
-
-        ## Layer 1
-
-        if self.hor:
-            n, rn = self.adj.size()
-        else:
-            rn, n = self.adj.size()
-
-        r = rn // n
 
         h0 = n if self.insize is None else self.insize
         h1 = self.outsize
@@ -122,6 +123,9 @@ class RGCNLayer(nn.Module):
 
         if self.insize is None:
             # -- input is the identity matrix, just multiply the weights by the adjacencies
+            print(weights.is_cuda)
+            print(self.adj.is_cuda)
+
             out = torch.mm(self.adj, weights.view(r*h0, h1))
 
         elif self.hor:
