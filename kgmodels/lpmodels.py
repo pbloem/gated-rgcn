@@ -306,7 +306,6 @@ class LinkPrediction(nn.Module):
 
             if self.dropout is not None and self.training:
                 # We drop out edges by actually removing the triples, to save on memory
-
                 assert len(self.dropout) == 2
 
                 keep, keepid = 1.0 - self.dropout[0], 1.0 - self.dropout[1]
@@ -338,6 +337,8 @@ class LinkPrediction(nn.Module):
         scores = self.decoder(batch, nodes, relations, biases=biases)
 
         assert scores.size() == (util.prod(dims), )
+
+        del triples
 
         return scores.view(*dims)
 
