@@ -236,6 +236,11 @@ def load_lp(name, final=False, limit=None, bidir=False, prune=False):
         val_file = util.here('data/wn18rr/valid.txt')
         test_file = util.here('data/wn18rr/test.txt')
 
+    elif name == 'toy':
+        train_file = util.here('data/toy/train.txt')
+        val_file = util.here('data/toy/valid.txt')
+        test_file = util.here('data/toy/test.txt')
+
     else:
         raise Exception(f'Data {name} not recognized')
 

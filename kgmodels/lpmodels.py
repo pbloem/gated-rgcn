@@ -7,6 +7,7 @@ import torch.distributions as ds
 from math import sqrt, ceil
 
 import layers, util
+from util import d
 
 import torch as T
 
@@ -17,7 +18,7 @@ import matplotlib.pyplot as plt
 
 class RGCNLayer(nn.Module):
 
-    def __init__(self, triples, n, r, insize=None, outsize=16, decomp=None, hor=True, numbases=None, numblocks=None):
+    def __init__(self, n, r, insize=None, outsize=16, decomp=None, hor=True, numbases=None, numblocks=None):
 
         super().__init__()
 
@@ -25,25 +26,9 @@ class RGCNLayer(nn.Module):
         self.insize, self.outsize = insize, outsize
         self.hor = hor
 
-        # horizontally and vertically stacked versions of the adjacency graph
-        # (the vertical is always necessary to normalize the adjacencies)
-        if hor:
-            hor_ind, hor_size = util.adj_triples(triples, n, r, vertical=False)
+        rn = r * n
 
-        ver_ind, ver_size = util.adj_triples(triples, n, r, vertical=True)
-        rn, _ = ver_size
-        r = rn // n
-
-        # compute values of row-normalized adjacency matrices (ame for hor and ver)
-        vals = torch.ones(ver_ind.size(0), dtype=torch.float)
-        vals = vals / util.sum_sparse(ver_ind, vals, ver_size)
-
-        if hor:
-            hor_graph = torch.sparse.FloatTensor(indices=hor_ind.t(), values=vals, size=hor_size)
-            self.register_buffer('adj', hor_graph)
-        else:
-            ver_graph = torch.sparse.FloatTensor(indices=ver_ind.t(), values=vals, size=ver_size)
-            self.register_buffer('adj', ver_graph)
+        self.n, self.r = n, r
 
         h0 = n if insize is None else insize
         h1 = outsize
@@ -80,8 +65,35 @@ class RGCNLayer(nn.Module):
 
         self.bias = nn.Parameter(torch.FloatTensor(outsize).zero_())
 
-    def forward(self, nodes=None):
+    def forward(self, triples, nodes=None):
 
+        n, r = self.n, self.r
+        rn = r * n
+
+        with torch.no_grad():
+            ## Construct the graph
+
+            # horizontally and vertically stacked versions of the adjacency graph
+            # (the vertical is always necessary to normalize the adjacencies)
+            if self.hor:
+                hor_ind, hor_size = util.adj_triples(triples, n, r, vertical=False)
+
+            ver_ind, ver_size = util.adj_triples(triples, n, r, vertical=True)
+            rn, _ = ver_size
+            r = rn // n
+
+            # compute values of row-normalized adjacency matrices (same for hor and ver)
+            vals = torch.ones(ver_ind.size(0), dtype=torch.float)
+            vals = vals / util.sum_sparse(ver_ind, vals, ver_size)
+
+            if self.hor:
+                hor_graph = torch.sparse.FloatTensor(indices=hor_ind.t(), values=vals, size=hor_size)
+                self.register_buffer('adj', hor_graph)
+            else:
+                ver_graph = torch.sparse.FloatTensor(indices=ver_ind.t(), values=vals, size=ver_size)
+                self.register_buffer('adj', ver_graph)
+
+        ## Perform message passing
         assert (nodes is None) == (self.insize is None)
 
         ## Layer 1
@@ -158,6 +170,27 @@ def distmult(triples, nodes, relations, biases=None):
 
     return (s * p * o).sum(dim=1) + sb[si] + pb[pi] + ob[oi] + gb
 
+def add_inverse_and_self(triples, n, r):
+    """
+    Adds inverse relations and self loops to a tensor of triples
+
+    :param triples:
+    :return:
+    """
+    b, _ = triples.size()
+
+    inv = torch.cat([triples[:, 2, None], triples[:, 1, None] + r, triples[:, 0, None]], dim=1)
+
+    assert inv.size() == (b, 3)
+
+    all = torch.arange(n, device=d(triples))[:, None]
+    id  = torch.empty(size=(n, 1), device=d(triples)).fill_(2*r)
+    slf = torch.cat([all, id, all], dim=1)
+
+    assert slf.size() == (n, 3)
+
+    return torch.cat([triples, slf, inv], dim=0)
+
 
 class LinkPrediction(nn.Module):
     """
@@ -166,23 +199,40 @@ class LinkPrediction(nn.Module):
     Outputs raw (linear) scores for the given triples.
     """
 
-    def __init__(self, triples, n, r, depth=2, hidden=16, out=16, decomp=None, numbases=None, numblocks=None, decoder='distmult', do=None, init=0.85, biases=False):
+    def __init__(self, triples, n, r, depth=2, hidden=16, out=16, decomp=None, numbases=None, numblocks=None, decoder='distmult', do=None, init=0.85, biases=False, prune=False):
 
         super().__init__()
 
         self.layer0 = self.layer1 = None
+        self.all_triples = triples
+        self.depth, self.prune = depth, prune
+        self.n, self.r = n, r
+
+        if self.prune:
+            self.lookup = {}
+            for node in range(n):
+                self.lookup[node] = set()
+
+            for (s, p, o) in triples.tolist():
+                for node in [s, o]:
+
+                    self.lookup[node].add((s, p, o))
+        else:
+            # add inverse relations and self loops
+            with torch.no_grad():
+                self.all_triples_plus = add_inverse_and_self(triples, n, r)
 
         if depth == 0:
             self.embeddings = nn.Parameter(torch.FloatTensor(n, hidden).uniform_(-init, init))  # single embedding per node
 
         elif depth == 1:
-            self.layer0 = RGCNLayer(triples, n, r, insize=None, outsize=out, hor=True,
+            self.layer0 = RGCNLayer(n=n, r=r * 2 + 1, insize=None, outsize=out, hor=True,
                                     decomp=decomp, numbases=numbases, numblocks=numblocks)
         elif depth == 2:
-            self.layer0 = RGCNLayer(triples, n, r, insize=None, outsize=hidden, hor=True,
+            self.layer0 = RGCNLayer(n=n, r=r * 2 + 1, insize=None, outsize=hidden, hor=True,
                                     decomp=decomp, numbases=numbases, numblocks=numblocks)
 
-            self.layer1 = RGCNLayer(triples, n, r, insize=hidden, outsize=out, hor=True,
+            self.layer1 = RGCNLayer(n=n, r=r * 2 + 1, insize=hidden, outsize=out, hor=True,
                                     decomp=decomp, numbases=numbases, numblocks=numblocks)
         else:
             raise Exception('Not yet implemented.')
@@ -199,7 +249,6 @@ class LinkPrediction(nn.Module):
 
         self.biases = biases
         if biases:
-
             self.gbias = nn.Parameter(torch.zeros((1,)))
             self.sbias = nn.Parameter(torch.zeros((n,)))
             self.pbias = nn.Parameter(torch.zeros((r,)))
@@ -208,17 +257,47 @@ class LinkPrediction(nn.Module):
     def register_buffer(self, name: str, tensor: Tensor) -> None:
         super().register_buffer(name, tensor)
 
-    def forward(self, triples):
+    def forward(self, batch):
 
-        assert triples.size(-1) == 3
+        assert batch.size(-1) == 3
 
-        dims = triples.size()[:-1]
-        triples = triples.reshape(-1, 3)
+        n, r = self.n, self.r
 
-        nodes = self.embeddings if self.layer0 is None else self.layer0()
+        dims = batch.size()[:-1]
+        batch = batch.reshape(-1, 3)
+        batchl = batch.tolist()
+
+        if self.prune and self.depth > 0:
+            # gather all triples that are relevant to the current batch
+            triples = {tuple(t) for t in batchl}
+
+            nds = set()
+            for s, _, o in batchl:
+                nds.add(s)
+                nds.add(o)
+
+            for _ in range(self.depth):
+            #-- gather all triples that are close enough to the batch triples to be relevant
+
+                inc_triples = set()
+                for n in nds:
+                    inc_triples.update(self.lookup[n])
+
+                triples.update(inc_triples)
+
+                nds.update([s for (s, _, _) in inc_triples])
+                nds.update([o for (_, _, o) in inc_triples])
+
+            triples = torch.tensor(list(triples), device=d(self.all_triples))
+            with torch.no_grad():
+                triples = add_inverse_and_self(triples, n, r)
+        else:
+            triples = self.all_triples_plus # just use all triples
+
+        nodes = self.embeddings if self.layer0 is None else self.layer0(triples=triples)
 
         if self.layer1 is not None:
-            nodes = self.layer1(nodes)
+            nodes = self.layer1(triples=triples, nodes=nodes)
 
         if self.do is not None:
             nodes = self.do(nodes)
@@ -231,7 +310,7 @@ class LinkPrediction(nn.Module):
         else:
             biases = None
 
-        scores = self.decoder(triples, nodes, relations, biases=biases)
+        scores = self.decoder(batch, nodes, relations, biases=biases)
 
         assert scores.size() == (util.prod(dims), )
 

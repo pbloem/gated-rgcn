@@ -120,7 +120,8 @@ def go(arg):
         if arg.model == 'classic':
             model = kgmodels.LinkPrediction(
                 triples=train, n=len(i2n), r=len(i2r), hidden=arg.emb, out=arg.emb, decomp=arg.decomp,
-                numbases=arg.num_bases, numblocks=arg.num_blocks, depth=arg.depth, do=arg.do, biases=arg.biases)
+                numbases=arg.num_bases, numblocks=arg.num_blocks, depth=arg.depth, do=arg.do, biases=arg.biases,
+                prune=arg.prune)
         elif arg.model == 'emb':
             pass
         elif arg.model == 'weighted':
