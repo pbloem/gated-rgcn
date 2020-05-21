@@ -100,6 +100,9 @@ class RGCNLayer(nn.Module):
         else:
             self.adj = torch.sparse.FloatTensor(indices=ver_ind.t(), values=vals, size=ver_size, device=d(triples))
 
+        print(triples.is_cuda, self.adj.is_cuda)
+        sys.exit()
+
         ## Perform message passing
         assert (nodes is None) == (self.insize is None)
 
