@@ -102,6 +102,9 @@ class RGCNLayer(nn.Module):
         else:
             self.adj = FT(indices=ver_ind.t(), values=vals, size=ver_size)
 
+        print(triples.is_cuda, self.adj.is_cuda)
+        sys.exit()
+
         ## Perform message passing
         assert (nodes is None) == (self.insize is None)
 
@@ -294,6 +297,8 @@ class LinkPrediction(nn.Module):
                 triples = add_inverse_and_self(triples, n, r)
         else:
             triples = self.all_triples_plus # just use all triples
+
+        print(triples.is_cuda, self.all_triples.is_cuda, '*')
 
         nodes = self.embeddings if self.layer0 is None else self.layer0(triples=triples)
 
