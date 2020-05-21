@@ -202,9 +202,10 @@ class LinkPrediction(nn.Module):
         super().__init__()
 
         self.layer0 = self.layer1 = None
-        self.all_triples = triples
         self.depth, self.prune = depth, prune
         self.n, self.r = n, r
+
+        self.register_buffer('all_triples', triples)
 
         if self.prune:
             self.lookup = {}
@@ -218,7 +219,7 @@ class LinkPrediction(nn.Module):
         else:
             # add inverse relations and self loops
             with torch.no_grad():
-                self.all_triples_plus = add_inverse_and_self(triples, n, r)
+                self.register_buffer('all_triples_plus', add_inverse_and_self(triples, n, r))
 
         if depth == 0:
             self.embeddings = nn.Parameter(torch.FloatTensor(n, hidden).uniform_(-init, init))  # single embedding per node
@@ -289,9 +290,6 @@ class LinkPrediction(nn.Module):
             triples = torch.tensor(list(triples), device=d(self.all_triples))
             with torch.no_grad():
                 triples = add_inverse_and_self(triples, n, r)
-
-            print(self.all_triples.is_cuda, triples.is_cuda)
-            sys.exit()
         else:
             triples = self.all_triples_plus # just use all triples
 
