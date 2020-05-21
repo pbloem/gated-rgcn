@@ -136,6 +136,42 @@ def adj_triples(triples, num_nodes, num_rels, cuda=False, vertical=True):
 
     return indices.t(), size
 
+def adj_triples_tensor(triples, num_nodes, num_rels, vertical=True):
+    """
+    Computes a sparse adjacency matrix for the given graph (the adjacency matrices of all
+    relations are stacked vertically).
+
+    :param edges: List representing the triples
+    :param i2r: list of relations
+    :param i2n: list of nodes
+    :return: sparse tensor
+    """
+    assert triples.dtype == torch.long
+
+    r, n = num_rels, num_nodes
+    size = (r*n, n) if vertical else (n, r*n)
+
+    tic()
+
+    fr, to = triples[:, 0], triples[:, 2]
+    offset = triples[:, 1] * n
+    if vertical:
+        fr = offset + fr
+    else:
+        to = offset + to
+
+    print('--- "loop"', toc())
+
+    tic()
+    indices = torch.cat([fr[:, None], to[:, None]], dim=1)
+    print('--- concat', toc())
+
+    assert indices.size(0) == triples.size(0)
+    assert indices[:, 0].max() < size[0], f'{indices[0, :].max()}, {size}, {r}'
+    assert indices[:, 1].max() < size[1], f'{indices[1, :].max()}, {size}, {r}'
+
+    return indices, size
+
 def sparsemm(use_cuda):
     """
     :param use_cuda:

@@ -88,10 +88,10 @@ class RGCNLayer(nn.Module):
         tic()
 
         if self.hor:
-            hor_ind, hor_size = util.adj_triples(triples, n, r, vertical=False)
+            hor_ind, hor_size = util.adj_triples_tensor(triples, n, r, vertical=False)
 
         tic()
-        ver_ind, ver_size = util.adj_triples(triples, n, r, vertical=True)
+        ver_ind, ver_size = util.adj_triples_tensor(triples, n, r, vertical=True)
         print('--adj_triples', toc())
 
         rn, _ = ver_size
@@ -200,7 +200,7 @@ def add_inverse_and_self(triples, n, r):
     assert inv.size() == (b, 3)
 
     all = torch.arange(n, device=d(triples))[:, None]
-    id  = torch.empty(size=(n, 1), device=d(triples)).fill_(2*r)
+    id  = torch.empty(size=(n, 1), device=d(triples), dtype=torch.long).fill_(2*r)
     slf = torch.cat([all, id, all], dim=1)
 
     assert slf.size() == (n, 3)
@@ -218,6 +218,8 @@ class LinkPrediction(nn.Module):
     def __init__(self, triples, n, r, depth=2, hidden=16, out=16, decomp=None, numbases=None, numblocks=None, decoder='distmult', do=None, init=0.85, biases=False, prune=False):
 
         super().__init__()
+
+        assert triples.dtype == torch.long
 
         self.layer0 = self.layer1 = None
         self.depth, self.prune = depth, prune
@@ -306,7 +308,7 @@ class LinkPrediction(nn.Module):
                 nds.update([s for (s, _, _) in inc_triples])
                 nds.update([o for (_, _, o) in inc_triples])
 
-            triples = torch.tensor(list(triples), device=d(self.all_triples))
+            triples = torch.tensor(list(triples), device=d(self.all_triples), dtype=torch.long)
             with torch.no_grad():
                 triples = add_inverse_and_self(triples, n, r)
         else:
