@@ -90,7 +90,10 @@ class RGCNLayer(nn.Module):
         if self.hor:
             hor_ind, hor_size = util.adj_triples(triples, n, r, vertical=False)
 
+        tic()
         ver_ind, ver_size = util.adj_triples(triples, n, r, vertical=True)
+        print('--adj_triples', toc())
+
         rn, _ = ver_size
 
         # compute values of row-normalized adjacency matrices (same for hor and ver)

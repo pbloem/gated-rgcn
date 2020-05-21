@@ -104,13 +104,13 @@ def adj_triples(triples, num_nodes, num_rels, cuda=False, vertical=True):
     :param i2n: list of nodes
     :return: sparse tensor
     """
-    ST = torch.cuda.sparse.FloatTensor if cuda else torch.sparse.FloatTensor
-
     r, n = num_rels, num_nodes
     size = (r*n, n) if vertical else (n, r*n)
 
     from_indices = []
     upto_indices = []
+
+    tic()
 
     for fr, rel, to in triples:
 
@@ -123,6 +123,8 @@ def adj_triples(triples, num_nodes, num_rels, cuda=False, vertical=True):
 
         from_indices.append(fr)
         upto_indices.append(to)
+
+    print('--- loop', toc())
 
     indices = torch.tensor([from_indices, upto_indices], dtype=torch.long, device=d(cuda))
 
