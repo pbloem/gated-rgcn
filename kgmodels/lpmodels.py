@@ -81,27 +81,26 @@ class RGCNLayer(nn.Module):
         n, r = self.n, self.r
         rn = r * n
 
-        with torch.no_grad():
-            ## Construct the graph
+        ## Construct the graph
 
-            # horizontally and vertically stacked versions of the adjacency graph
-            # (the vertical is always necessary to normalize the adjacencies)
-            if self.hor:
-                hor_ind, hor_size = util.adj_triples(triples, n, r, vertical=False)
+        # horizontally and vertically stacked versions of the adjacency graph
+        # (the vertical is always necessary to normalize the adjacencies)
+        if self.hor:
+            hor_ind, hor_size = util.adj_triples(triples, n, r, vertical=False)
 
-            ver_ind, ver_size = util.adj_triples(triples, n, r, vertical=True)
-            rn, _ = ver_size
+        ver_ind, ver_size = util.adj_triples(triples, n, r, vertical=True)
+        rn, _ = ver_size
 
-            # compute values of row-normalized adjacency matrices (same for hor and ver)
-            vals = torch.ones(ver_ind.size(0), dtype=torch.float)
-            vals = vals / util.sum_sparse(ver_ind, vals, ver_size)
+        # compute values of row-normalized adjacency matrices (same for hor and ver)
+        vals = torch.ones(ver_ind.size(0), dtype=torch.float)
+        vals = vals / util.sum_sparse(ver_ind, vals, ver_size)
 
-            if self.hor:
-                hor_graph = torch.sparse.FloatTensor(indices=hor_ind.t(), values=vals, size=hor_size)
-                self.register_buffer('adj', hor_graph)
-            else:
-                ver_graph = torch.sparse.FloatTensor(indices=ver_ind.t(), values=vals, size=ver_size)
-                self.register_buffer('adj', ver_graph)
+        if self.hor:
+            hor_graph = torch.sparse.FloatTensor(indices=hor_ind.t(), values=vals, size=hor_size)
+            self.register_buffer('adj', hor_graph)
+        else:
+            ver_graph = torch.sparse.FloatTensor(indices=ver_ind.t(), values=vals, size=ver_size)
+            self.register_buffer('adj', ver_graph)
 
         ## Perform message passing
         assert (nodes is None) == (self.insize is None)
@@ -123,9 +122,6 @@ class RGCNLayer(nn.Module):
 
         if self.insize is None:
             # -- input is the identity matrix, just multiply the weights by the adjacencies
-            print(weights.is_cuda)
-            print(self.adj.is_cuda)
-
             out = torch.mm(self.adj, weights.view(r*h0, h1))
 
         elif self.hor:
