@@ -105,7 +105,7 @@ class RGCNLayer(nn.Module):
         if triples.is_cuda:
             self.adj = self.adj.to('cuda')
 
-        print('create adj', toc)
+        print('create adj', toc())
 
         ## Perform message passing
         assert (nodes is None) == (self.insize is None)
@@ -265,6 +265,8 @@ class LinkPrediction(nn.Module):
 
     def forward(self, batch):
 
+        tic()
+
         assert batch.size(-1) == 3
 
         n, r = self.n, self.r
@@ -323,9 +325,14 @@ class LinkPrediction(nn.Module):
         else:
             biases = None
 
+        tic()
         scores = self.decoder(batch, nodes, relations, biases=biases)
+        print('decoder', toc())
+
 
         assert scores.size() == (util.prod(dims), )
+
+        print('TOTAL', toc())
 
         return scores.view(*dims)
 
