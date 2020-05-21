@@ -121,7 +121,7 @@ def go(arg):
             model = kgmodels.LinkPrediction(
                 triples=train, n=len(i2n), r=len(i2r), hidden=arg.emb, out=arg.emb, decomp=arg.decomp,
                 numbases=arg.num_bases, numblocks=arg.num_blocks, depth=arg.depth, do=arg.do, biases=arg.biases,
-                prune=arg.prune)
+                prune=arg.prune, dropout=arg.edge_dropout)
         elif arg.model == 'emb':
             pass
         elif arg.model == 'weighted':
@@ -356,11 +356,6 @@ if __name__ == "__main__":
                         help="Weight for explicit L2 loss term.",
                         default=None, type=float)
 
-    parser.add_argument("--do",
-                        dest="do",
-                        help="Dropout",
-                        default=None, type=float)
-
     parser.add_argument("-D", "--dataset-name",
                         dest="name",
                         help="Name of dataset to use [fb, wn]",
@@ -424,10 +419,6 @@ if __name__ == "__main__":
                         help="Condition on the target node.",
                         action="store_true")
 
-    parser.add_argument("--dropin", dest="dropin",
-                        help="Randomly mask out connections by atte tion weight.",
-                        action="store_true")
-
     parser.add_argument("--separate-embeddings", dest="sep_emb",
                         help="Separate embeddings per relation (expensive, but closer to original RGCN).",
                         action="store_true")
@@ -451,6 +442,18 @@ if __name__ == "__main__":
     parser.add_argument("--biases", dest="biases",
                         help="Learn bias parameters.",
                         action="store_true")
+
+    parser.add_argument("--edge-dropout",
+                        dest="edge_dropout",
+                        nargs=2,
+                        help="Dropout rate (general, self-loops).",
+                        default=None, type=float)
+
+    parser.add_argument("--dropout",
+                        dest="do",
+                        help="Embedding dropout (applied just before encoder).",
+                        default=None, type=float)
+
 
     options = parser.parse_args()
 

@@ -4,10 +4,12 @@ from torch import nn, Tensor
 import torch.nn.functional as F
 import torch.distributions as ds
 
-from math import sqrt, ceil
+from math import sqrt, ceil, floor
+import random
 
 import layers, util
 from util import d, tic, toc
+
 
 import torch as T
 
@@ -202,7 +204,8 @@ class LinkPrediction(nn.Module):
     Outputs raw (linear) scores for the given triples.
     """
 
-    def __init__(self, triples, n, r, depth=2, hidden=16, out=16, decomp=None, numbases=None, numblocks=None, decoder='distmult', do=None, init=0.85, biases=False, prune=False):
+    def __init__(self, triples, n, r, depth=2, hidden=16, out=16, decomp=None, numbases=None, numblocks=None,
+                 decoder='distmult', do=None, init=0.85, biases=False, prune=False, dropout=None, **kwargs):
 
         super().__init__()
 
@@ -211,6 +214,8 @@ class LinkPrediction(nn.Module):
         self.layer0 = self.layer1 = None
         self.depth, self.prune = depth, prune
         self.n, self.r = n, r
+
+        self.dropout = dropout
 
         self.register_buffer('all_triples', triples)
 
@@ -233,13 +238,13 @@ class LinkPrediction(nn.Module):
 
         elif depth == 1:
             self.layer0 = RGCNLayer(n=n, r=r * 2 + 1, insize=None, outsize=out, hor=True,
-                                    decomp=decomp, numbases=numbases, numblocks=numblocks)
+                                    decomp=decomp, numbases=numbases, numblocks=numblocks, **kwargs)
         elif depth == 2:
             self.layer0 = RGCNLayer(n=n, r=r * 2 + 1, insize=None, outsize=hidden, hor=True,
-                                    decomp=decomp, numbases=numbases, numblocks=numblocks)
+                                    decomp=decomp, numbases=numbases, numblocks=numblocks, **kwargs)
 
             self.layer1 = RGCNLayer(n=n, r=r * 2 + 1, insize=hidden, outsize=out, hor=True,
-                                    decomp=decomp, numbases=numbases, numblocks=numblocks)
+                                    decomp=decomp, numbases=numbases, numblocks=numblocks, **kwargs)
         else:
             raise Exception('Not yet implemented.')
 
@@ -262,7 +267,6 @@ class LinkPrediction(nn.Module):
 
     def forward(self, batch):
 
-
         assert batch.size(-1) == 3
 
         n, r = self.n, self.r
@@ -271,32 +275,49 @@ class LinkPrediction(nn.Module):
         batch = batch.reshape(-1, 3)
         batchl = batch.tolist()
 
-        if self.prune and self.depth > 0:
-            # gather all triples that are relevant to the current batch
-            triples = {tuple(t) for t in batchl}
+        with torch.no_grad():
 
-            nds = set()
-            for s, _, o in batchl:
-                nds.add(s)
-                nds.add(o)
+            if self.prune and self.depth > 0:
+                # gather all triples that are relevant to the current batch
+                triples = {tuple(t) for t in batchl}
 
-            for _ in range(self.depth):
-            #-- gather all triples that are close enough to the batch triples to be relevant
+                nds = set()
+                for s, _, o in batchl:
+                    nds.add(s)
+                    nds.add(o)
 
-                inc_triples = set()
-                for n in nds:
-                    inc_triples.update(self.lookup[n])
+                for _ in range(self.depth):
+                #-- gather all triples that are close enough to the batch triples to be relevant
 
-                triples.update(inc_triples)
+                    inc_triples = set()
+                    for n in nds:
+                        inc_triples.update(self.lookup[n])
 
-                nds.update([s for (s, _, _) in inc_triples])
-                nds.update([o for (_, _, o) in inc_triples])
+                    triples.update(inc_triples)
 
-            triples = torch.tensor(list(triples), device=d(self.all_triples), dtype=torch.long)
-            with torch.no_grad():
-                triples = add_inverse_and_self(triples, n, r)
-        else:
-            triples = self.all_triples_plus # just use all triples
+                    nds.update([s for (s, _, _) in inc_triples])
+                    nds.update([o for (_, _, o) in inc_triples])
+
+                triples = torch.tensor(list(triples), device=d(self.all_triples), dtype=torch.long)
+                with torch.no_grad():
+                    triples = add_inverse_and_self(triples, n, r)
+            else:
+                triples = self.all_triples_plus # just use all triples
+
+            if self.dropout is not None and self.training:
+                # We drop out edges by actually removing the triples, to save on memory
+
+                assert len(self.dropout) == 2
+
+                keep, keepid = 1.0 - self.dropout[0], 1.0 - self.dropout[1]
+
+                nt = triples.size(0) - n
+
+                keep_ind = random.sample(range(nt), k=int(floor(keep * nt)) )
+                keepid_ind = random.sample(range(nt, nt + n), k=int(floor(keepid * n)))
+                ind = keep_ind + keepid_ind
+
+                triples = triples[ind, :]
 
         nodes = self.embeddings if self.layer0 is None else self.layer0(triples=triples)
 
