@@ -95,12 +95,13 @@ class RGCNLayer(nn.Module):
         vals = torch.ones(ver_ind.size(0), dtype=torch.float)
         vals = vals / util.sum_sparse(ver_ind, vals, ver_size)
 
-
-        FT = torch.cuda.sparse.FloatTensor if triples.is_cuda else torch.sparse.FloatTensor
         if self.hor:
-            self.adj = FT(indices=hor_ind.t(), values=vals, size=hor_size)
+            self.adj = torch.sparse.FloatTensor(indices=hor_ind.t(), values=vals, size=hor_size)
         else:
-            self.adj = FT(indices=ver_ind.t(), values=vals, size=ver_size)
+            self.adj = torch.sparse.FloatTensor(indices=ver_ind.t(), values=vals, size=ver_size)
+
+        if triples.is_cuda:
+            self.adj = self.adj.to('cuda')
 
         print(triples.is_cuda, self.adj.is_cuda)
         sys.exit()
@@ -297,8 +298,6 @@ class LinkPrediction(nn.Module):
                 triples = add_inverse_and_self(triples, n, r)
         else:
             triples = self.all_triples_plus # just use all triples
-
-        print(triples.is_cuda, self.all_triples.is_cuda, '*')
 
         nodes = self.embeddings if self.layer0 is None else self.layer0(triples=triples)
 
