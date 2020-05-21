@@ -98,7 +98,7 @@ class RGCNLayer(nn.Module):
 
         # compute values of row-normalized adjacency matrices (same for hor and ver)
         tic()
-        vals = torch.ones(ver_ind.size(0), dtype=torch.float)
+        vals = torch.ones(ver_ind.size(0), dtype=torch.float, device=d(triples))
         vals = vals / util.sum_sparse(ver_ind, vals, ver_size)
         print('--normalize', toc())
 
