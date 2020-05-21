@@ -232,7 +232,7 @@ def go(arg):
                 seen += b; seeni += b
                 ttotal += toc()
 
-                print(f'epoch {e}; training loss {sumloss/seeni:.4}       s {tsample:.3}s, f {tforward:.3}s (loss {tloss:.3}s), b {tbackward:.3}, st {tstep:.3}, t {ttotal:.3}s')
+            print(f'epoch {e}; training loss {sumloss/seeni:.4}       s {tsample:.3}s, f {tforward:.3}s (loss {tloss:.3}s), b {tbackward:.3}, st {tstep:.3}, t {ttotal:.3}s')
 
             # Evaluate
             if (e % arg.eval_int == 0 and e !=0) or e == arg.epochs - 1:

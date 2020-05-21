@@ -85,6 +85,8 @@ class RGCNLayer(nn.Module):
 
         # horizontally and vertically stacked versions of the adjacency graph
         # (the vertical is always necessary to normalize the adjacencies)
+        tic()
+
         if self.hor:
             hor_ind, hor_size = util.adj_triples(triples, n, r, vertical=False)
 
@@ -92,10 +94,10 @@ class RGCNLayer(nn.Module):
         rn, _ = ver_size
 
         # compute values of row-normalized adjacency matrices (same for hor and ver)
+        tic()
         vals = torch.ones(ver_ind.size(0), dtype=torch.float)
         vals = vals / util.sum_sparse(ver_ind, vals, ver_size)
-
-        tic()
+        print('--normalize', toc())
 
         if self.hor:
             self.adj = torch.sparse.FloatTensor(indices=hor_ind.t(), values=vals, size=hor_size)
@@ -106,6 +108,7 @@ class RGCNLayer(nn.Module):
             self.adj = self.adj.to('cuda')
 
         print('create adj', toc())
+        tic()
 
         ## Perform message passing
         assert (nodes is None) == (self.insize is None)
@@ -124,6 +127,8 @@ class RGCNLayer(nn.Module):
             # TODO: multiply in block form (more efficient, but implementation differs per layer type)
 
         assert weights.size() == (r, h0, h1)
+
+        print('prep weights', toc())
 
         tic()
         if self.insize is None:
