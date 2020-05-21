@@ -316,7 +316,9 @@ class LinkPrediction(nn.Module):
                 keepid_ind = random.sample(range(nt, nt + n), k=int(floor(keepid * n)))
                 ind = keep_ind + keepid_ind
 
-                triples = triples[ind, :]
+                subtriples = triples[ind, :]
+                triples = subtriples.data
+                del subtriples
 
         nodes = self.embeddings if self.layer0 is None else self.layer0(triples=triples)
 
@@ -337,8 +339,6 @@ class LinkPrediction(nn.Module):
         scores = self.decoder(batch, nodes, relations, biases=biases)
 
         assert scores.size() == (util.prod(dims), )
-
-        del triples
 
         return scores.view(*dims)
 
