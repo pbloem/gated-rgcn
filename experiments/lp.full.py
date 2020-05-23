@@ -122,8 +122,11 @@ def go(arg):
                 triples=train, n=len(i2n), r=len(i2r), hidden=arg.emb, out=arg.emb, decomp=arg.decomp,
                 numbases=arg.num_bases, numblocks=arg.num_blocks, depth=arg.depth, do=arg.do, biases=arg.biases,
                 prune=arg.prune, dropout=arg.edge_dropout)
-        elif arg.model == 'emb':
-            pass
+        elif arg.model == 'narrow':
+            model = kgmodels.LPNarrow(
+                triples=train, n=len(i2n), r=len(i2r), emb=arg.emb, hidden=arg.hidden, decomp=arg.decomp,
+                numbases=arg.num_bases, numblocks=arg.num_blocks, depth=arg.depth, do=arg.do, biases=arg.biases,
+                prune=arg.prune, edge_dropout=arg.edge_dropout)
         elif arg.model == 'weighted':
             pass
         else:
@@ -155,10 +158,10 @@ def go(arg):
                 model.train(True)
 
                 if arg.limit is not None and seeni > arg.limit:
-                    break
-
-                # if torch.cuda.is_available() and random.random() < 0.01:
+                    break                # if torch.cuda.is_available() and random.random() < 0.01:
                 #     print(f'\nPeak gpu memory use is {torch.cuda.max_memory_cached() / 1e9:.2} Gb')
+
+
 
                 to = min(train.size(0), fr + arg.batch)
 
@@ -330,12 +333,12 @@ if __name__ == "__main__":
     parser.add_argument("-E", "--embedding-size",
                         dest="emb",
                         help="Size (nr of dimensions) of the hidden layer.",
-                        default=16, type=int)
-
-    parser.add_argument("--embedding-init",
-                        dest="emb1",
-                        help="Size (nr of dimensions) of the _initial_ node embeddings (applies to emb model only).",
                         default=128, type=int)
+
+    parser.add_argument("--hidden",
+                        dest="hidden",
+                        help="Size of the hidden layer).",
+                        default=16, type=int)
 
     parser.add_argument("-l", "--learn-rate",
                         dest="lr",

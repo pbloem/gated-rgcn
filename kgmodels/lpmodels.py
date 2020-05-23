@@ -17,8 +17,144 @@ import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
 
-
 class RGCNLayer(nn.Module):
+
+    def __init__(self, triples, n, r, insize=None, outsize=16, decomp=None, hor=True, numbases=None, numblocks=None, edge_dropout=None):
+        """
+
+        :param n:
+        :param r:
+        :param insize: size of the input. None if the input is one-hot vectors
+        :param outsize:
+        :param decomp:
+        :param hor:
+        :param numbases:
+        :param numblocks:
+        """
+
+        super().__init__()
+
+        self.decomp = decomp
+        self.insize, self.outsize = insize, outsize
+        self.hor = hor
+        self.edo = edge_dropout
+
+        rn = r * n
+        self.n, self.r = n, r
+
+        h0 = n if insize is None else insize
+        h1 = outsize
+
+        ## Construct the graph
+
+        # horizontally and vertically stacked versions of the adjacency graph
+        ind, size = util.adj_triples_tensor(triples, n, r, vertical=not hor)
+
+        # self.register_buffer('adj', torch.sparse.FloatTensor(indices=ind.t(), values=vals, size=size))
+        self.register_buffer('indices', ind)
+        self.adjsize = size
+
+        # layer 1 weights
+        if decomp is None:
+            # -- no weight decomposition
+
+            self.weights = nn.Parameter(torch.FloatTensor(r, h0, h1))
+            nn.init.xavier_uniform_(self.weights, gain=nn.init.calculate_gain('relu'))
+
+        elif decomp == 'basis':
+            # -- basis decomposition
+
+            assert numbases is not None
+
+            self.comps = nn.Parameter(torch.FloatTensor(r, numbases))
+            nn.init.xavier_uniform_(self.comps, gain=nn.init.calculate_gain('relu'))
+
+            self.bases = nn.Parameter(torch.FloatTensor(numbases, h0, h1))
+            nn.init.xavier_uniform_(self.bases, gain=nn.init.calculate_gain('relu'))
+
+        elif decomp == 'block':
+            # -- block decomposition
+
+            assert numblocks is not None
+            assert h0 % numblocks == 0 and h1 % numblocks == 0, f'{h0} {h1} '
+
+            self.blocks = nn.Parameter(torch.FloatTensor(r, numblocks, h0 // numblocks, h1 // numblocks))
+            nn.init.xavier_uniform_(self.blocks, gain=nn.init.calculate_gain('relu'))
+
+        else:
+            raise Exception(f'Decomposition method {decomp} not recognized')
+
+        self.bias = nn.Parameter(torch.FloatTensor(outsize).zero_())
+
+    def forward(self, nodes=None):
+
+        n, r = self.n, self.r
+        rn = r * n
+
+        ## Perform message passing
+        assert (nodes is None) == (self.insize is None)
+
+        h0 = n if self.insize is None else self.insize
+        h1 = self.outsize
+
+        if self.decomp is None:
+            weights = self.weights
+
+        elif self.decomp == 'basis':
+            weights = torch.einsum('rb, bij -> rij', self.comps, self.bases)
+
+        elif self.decomp == 'block':
+            weights = util.block_diag(self.blocks)
+            # TODO: multiply in block form (more efficient, but implementation differs per layer type)
+
+        assert weights.size() == (r, h0, h1)
+
+        if self.edo is not None and self.training:
+            # apply edge dropout
+
+            p, pid = self.edo
+
+            nt = self.indices.size(0) - n
+
+            mask   = torch.bernoulli(torch.empty(size=(nt,), dtype=torch.float, device=d(self.bias)).fill_(1.0 - p  ))
+            maskid = torch.bernoulli(torch.empty(size=(n, ), dtype=torch.float, device=d(self.bias)).fill_(1.0 - pid))
+
+            vals = torch.cat([mask, maskid], dim=0)
+
+        else:
+            vals = torch.ones(self.indices.size(0), dtype=torch.float, device=d(self.bias))
+
+        # Row- or column normalize the values of the adjacency matrix
+        vals = vals / util.sum_sparse(self.indices, vals, self.adjsize, row=not self.hor)
+
+        adj = torch.sparse.FloatTensor(indices=self.indices.t(), values=vals, size=self.adjsize)
+        if self.bias.is_cuda:
+            adj = adj.to('cuda')
+
+        if self.insize is None:
+            # -- input is the identity matrix, just multiply the weights by the adjacencies
+            out = torch.mm(adj, weights.view(r*h0, h1))
+
+        elif self.hor:
+            # -- input is high-dim and output is low dim, multiply h0 x weights first
+            nodes = nodes[None, :, :].expand(r, n, h0)
+            nw = torch.einsum('rni, rio -> rno', nodes, weights).contiguous()
+            out = torch.mm(adj, nw.view(r*n, h1))
+
+        else:
+            # -- adj x h0 first, then weights
+            out = torch.mm(adj, nodes)  # sparse mm
+            out = out.view(r, n, h0)  # new dim for the relations
+            out = torch.einsum('rio, rni -> no', weights, out)
+
+        assert out.size() == (n, h1)
+
+        return out + self.bias
+
+class RGCNPruning(nn.Module):
+    """
+    RGCN which prunes the graph (i.e. selects only the subgraph that affects the output. May save memory in some cases.
+    """
 
     def __init__(self, n, r, insize=None, outsize=16, decomp=None, hor=True, numbases=None, numblocks=None):
         """
@@ -145,7 +281,6 @@ class RGCNLayer(nn.Module):
 
         return out + self.bias
 
-
 def distmult(triples, nodes, relations, biases=None):
     """
     Implements the distmult score function.
@@ -195,7 +330,6 @@ def add_inverse_and_self(triples, n, r):
     assert slf.size() == (n, 3)
 
     return torch.cat([triples, slf, inv], dim=0)
-
 
 class LinkPrediction(nn.Module):
     """
@@ -340,4 +474,79 @@ class LinkPrediction(nn.Module):
 
         return scores.view(*dims)
 
+
+class LPNarrow(nn.Module):
+    """
+    Link prediction RGCN with a bottleneck. No pruning.
+
+    Outputs raw (linear) scores for the given triples.
+    """
+
+    def __init__(self, triples, n, r, depth=2, emb=128, hidden=16,
+                 decoder='distmult', do=None, init=0.85, biases=False, prune=False, dropout=None, **kwargs):
+
+        super().__init__()
+
+        assert triples.dtype == torch.long
+
+        self.depth, self.prune = depth, prune
+        self.n, self.r = n, r
+        self.hidden = hidden
+
+        self.dropout = dropout
+
+        triples = add_inverse_and_self(triples, n, r)
+
+        self.embeddings = nn.Parameter(torch.FloatTensor(n, emb).uniform_(-init, init))  # single embedding per node
+
+        layers = [
+            RGCNLayer(triples=triples, n=n, r=r * 2 + 1, insize=hidden, outsize=hidden, hor=False,  **kwargs)
+            for _ in range(depth)
+        ]
+        self.layers = nn.Sequential(*layers)
+
+        # layers to projetc to a smaller dim for message passing
+        self.tohidden, self.frhidden = nn.Linear(emb, hidden), nn.Linear(hidden, emb)
+
+        self.relations = nn.Parameter(torch.FloatTensor(r, emb).uniform_(-init, init))
+
+        if decoder == 'distmult':
+            self.decoder = distmult
+        else:
+            self.decoder = decoder
+
+
+        self.do = None if do is None else nn.Dropout(do)
+
+        self.biases = biases
+        if biases:
+            self.gbias = nn.Parameter(torch.zeros((1,)))
+            self.sbias = nn.Parameter(torch.zeros((n,)))
+            self.pbias = nn.Parameter(torch.zeros((r,)))
+            self.obias = nn.Parameter(torch.zeros((n,)))
+
+    def forward(self, batch):
+
+        assert batch.size(-1) == 3
+
+        n, r = self.n, self.r
+
+        dims = batch.size()[:-1]
+        batch = batch.reshape(-1, 3)
+
+        nodes = self.tohidden(self.embeddings)
+        nodes = self.layers(nodes) # -- message passing
+
+        embeddings = self.embeddings + self.frhidden(nodes)
+
+        if self.biases:
+            biases = (self.gbias, self.sbias, self.pbias, self.obias)
+        else:
+            biases = None
+
+        scores = self.decoder(batch, embeddings, self.relations, biases=biases)
+
+        assert scores.size() == (util.prod(dims), )
+
+        return scores.view(*dims)
 

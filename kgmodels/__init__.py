@@ -1,6 +1,6 @@
 from .models import GraphBlock, NodeClassifier, RGCNClassic, RGCNEmb, RGCNWeighted
 
-from .lpmodels import RGCNLayer, LinkPrediction
+from .lpmodels import RGCNLayer, LinkPrediction, LPNarrow
 
 from .layers import GAT, GCN
 
