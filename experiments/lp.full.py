@@ -157,8 +157,8 @@ def go(arg):
                 if arg.limit is not None and seeni > arg.limit:
                     break
 
-                # if torch.cuda.is_available() and random.random() < 0.01:
-                #     print(f'\nPeak gpu memory use is {torch.cuda.max_memory_cached() / 1e9:.2} Gb')
+                if torch.cuda.is_available() and random.random() < 0.01:
+                    print(f'\nPeak gpu memory use is {torch.cuda.max_memory_cached() / 1e9:.2} Gb')
 
                 to = min(train.size(0), fr + arg.batch)
 

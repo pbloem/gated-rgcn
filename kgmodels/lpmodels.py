@@ -316,9 +316,7 @@ class LinkPrediction(nn.Module):
                 keepid_ind = random.sample(range(nt, nt + n), k=int(floor(keepid * n)))
                 ind = keep_ind + keepid_ind
 
-                subtriples = triples[ind, :]
-                triples = subtriples.data
-                del subtriples
+                triples = triples[ind, :]
 
         nodes = self.embeddings if self.layer0 is None else self.layer0(triples=triples)
 
