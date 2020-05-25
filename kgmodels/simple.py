@@ -429,7 +429,7 @@ class SimpleLP(nn.Module):
     The simplest version of sampling link prediction.
     """
 
-    def __init__(self, triples, n, r, emb=128, h=16,
+    def __init__(self, triples, n, r, emb=128,
                  decoder='distmult', ksample=50, boost=0,
                  bases=None, dropout=None, csample=None, **kwargs):
 
@@ -441,7 +441,7 @@ class SimpleLP(nn.Module):
         self.inv_graph = invert_graph(self.graph, n)
         self.edges = triples.tolist()
 
-        self.embeddings = nn.Parameter(torch.FloatTensor(n, h).normal_())
+        self.embeddings = nn.Parameter(torch.FloatTensor(n, emb).normal_())
 
         self.gbias = nn.Parameter(torch.zeros((1,)))
         self.sbias = nn.Parameter(torch.zeros((self.n,)))
@@ -449,10 +449,10 @@ class SimpleLP(nn.Module):
         self.obias = nn.Parameter(torch.zeros((self.n,)))
 
         # global attention params
-        self.relations = nn.Parameter(torch.randn(self.r, h))
+        self.relations = nn.Parameter(torch.randn(self.r, emb))
         nn.init.xavier_uniform_(self.relations, gain=nn.init.calculate_gain('relu'))
-        self.tokeys    = nn.Linear(emb, h)
-        self.toqueries = nn.Linear(emb, h)
+        self.tokeys    = nn.Linear(emb, emb)
+        self.toqueries = nn.Linear(emb, emb)
 
         layers = [
             Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
@@ -461,10 +461,10 @@ class SimpleLP(nn.Module):
             Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
                 toqueries=self.toqueries, ksample=ksample, boost=boost, csample=csample, cls=self, **kwargs),
 
-            SimpleRGCN(self.graph, self.r, emb, h, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
+            SimpleRGCN(self.graph, self.r, hfr=emb, hto=emb, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
                 toqueries=self.toqueries, bases=bases, dropout=dropout, cls=self, **kwargs),
 
-            SimpleRGCN(self.graph, self.r, h, emb, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
+            SimpleRGCN(self.graph, self.r, hfr=emb, hto=emb, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
                 toqueries=self.toqueries, bases=bases, dropout=dropout, cls=self, **kwargs)
         ]
         self.layers = nn.ModuleList(modules=layers)
@@ -551,7 +551,10 @@ class Sample(nn.Module):
                 # Reservoir sampling with the actual weights
                 embeddings = self.nodes # raw embeddings (not batch embeddings)
 
-                si, pi, oi = torch.tensor([s for s, _, _ in cflat]), torch.tensor([p for _, p, _ in cflat]), torch.tensor([o for _, _, o in cflat])
+                si, pi, oi = \
+                    torch.tensor([s for s, _, _ in cflat], dtype=torch.long, device=d(batch.node_emb)), \
+                    torch.tensor([p for _, p, _ in cflat], dtype=torch.long, device=d(batch.node_emb)), \
+                    torch.tensor([o for _, _, o in cflat], dtype=torch.long, device=d(batch.node_emb))
 
                 # print(max(si), max(pi), max(oi))
                 # print(embeddings.size())
