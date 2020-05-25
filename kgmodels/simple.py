@@ -543,6 +543,9 @@ class Sample(nn.Module):
 
             cflat = list(batch.gen_inc_edges(bi))
 
+            if len(cflat) == 0:
+                continue
+
             if self.training:
 
                 cflat = torch.tensor(cflat)
@@ -578,7 +581,6 @@ class Sample(nn.Module):
                 weights, indices = torch.sort(weights, descending=True)
                 indices = indices[:self.ksample]
 
-                print(cflat.size())
                 cand_sampled = cflat[indices, :]
                 if random.random() < 0.0:
                     print(cand_sampled.size(), cflat.size())
