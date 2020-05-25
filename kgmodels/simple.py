@@ -81,6 +81,28 @@ def pad(elems, max, padelem=0, copy=False):
 
     return elems, ([1] * ln) + ([0] * (max-ln))
 
+def el2rel(triples, n):
+    """
+    Converts from a list of triples to a dictionary mapping to outgoing triples
+    :param triples:
+    :return:
+    """
+
+    if isinstance(triples, torch.Tensor):
+        triples = triples.tolist()
+
+    assert max([s for s, _, _ in triples]) <= n
+    assert max([o for _, _, o in triples]) <= n
+
+    res = {}
+    for s in range(n):
+        res[s] = []
+
+    for s, p, o in triples:
+        res[s].append((s, p, o))
+
+    return res
+
 def convert(edges, num_nodes):
     """
     Convert from a relation dictionary to a edgelist representation.
@@ -97,21 +119,24 @@ def convert(edges, num_nodes):
 
     return res
 
-def invert_graph(graph):
+def invert_graph(graph, n):
     """
-    Hashes edges by outgoing node instead of incoming
+    Hashes edges by object node instead of subject
 
     :param edges:
     :param n:
     :return: A dictionary mapping nodes to outgoing triples.
     """
 
+    assert max(graph.keys()) <= n
+    assert max(graph.keys()) <= n
+
     res = {}
+    for s in range(n):
+        res[s] = []
 
     for _, edges in graph.items():
         for (s, p, o) in edges:
-            if o not in res:
-                res[o] = []
             res[o].append((s, p, o))
 
     return res
@@ -256,10 +281,18 @@ class Batch():
         return torch.tensor(self.edges, dtype=torch.long, device=d())
 
     def to_data_node(self, batch_node):
-
+        """
+        Converts a data node index to a batch node index
+        """
         return self.toind[batch_node][1]
 
     def to_data_nodes(self, batch_nodes):
+        """
+        Converts data node indices to batch indices
+
+        :param batch_nodes:
+        :return:
+        """
 
         dnodes = [self.to_data_node(node) for node in batch_nodes]
 
@@ -372,6 +405,107 @@ class SimpleClassifier(nn.Module):
         # -- softmax applied in loss
 
         return c
+
+def distmult(s, p, o, biases=None):
+    """
+    Implements the distmult score function.
+
+    :param triples: batch of triples, (b, 3) integers
+    :param nodes: node embeddings
+    :param relations: relation embeddings
+    :return:
+    """
+
+    if biases is None:
+        return (s * p * o).sum(dim=1)
+
+    gb, sb, pb, ob = biases
+
+    return (s * p * o).sum(dim=1) + sb + pb + ob + gb
+
+
+class SimpleLP(nn.Module):
+    """
+    The simplest version of sampling link prediction.
+    """
+
+    def __init__(self, triples, n, r, emb=128, h=16,
+                 decoder='distmult', ksample=50, boost=0,
+                 bases=None, dropout=None, csample=None, **kwargs):
+
+        super().__init__()
+
+        self.r, self.n, self.ksample = r, n, ksample
+
+        self.graph = el2rel(triples, n)
+        self.inv_graph = invert_graph(self.graph, n)
+        self.edges = triples.tolist()
+
+        self.embeddings = nn.Parameter(torch.FloatTensor(n, h).normal_())
+
+        self.gbias = nn.Parameter(torch.zeros((1,)))
+        self.sbias = nn.Parameter(torch.zeros((self.n,)))
+        self.pbias = nn.Parameter(torch.zeros((self.r,)))
+        self.obias = nn.Parameter(torch.zeros((self.n,)))
+
+        # global attention params
+        self.relations = nn.Parameter(torch.randn(self.r, h))
+        nn.init.xavier_uniform_(self.relations, gain=nn.init.calculate_gain('relu'))
+        self.tokeys    = nn.Linear(emb, h)
+        self.toqueries = nn.Linear(emb, h)
+
+        layers = [
+            Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
+                toqueries=self.toqueries, ksample=ksample, boost=boost, csample=csample, cls=self, **kwargs),
+
+            Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
+                toqueries=self.toqueries, ksample=ksample, boost=boost, csample=csample, cls=self, **kwargs),
+
+            SimpleRGCN(self.graph, self.r, emb, h, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
+                toqueries=self.toqueries, bases=bases, dropout=dropout, cls=self, **kwargs),
+
+            SimpleRGCN(self.graph, self.r, h, emb, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
+                toqueries=self.toqueries, bases=bases, dropout=dropout, cls=self, **kwargs)
+        ]
+        self.layers = nn.ModuleList(modules=layers)
+
+        if decoder == 'distmult':
+            self.decoder = distmult
+        else:
+            self.decoder = decoder
+
+    def forward(self, triples):
+
+        assert triples.size(-1) == 3
+
+        n, r = self.n, self.r
+
+        dims = triples.size()[:-1]
+        triples = triples.reshape(-1, 3)
+
+        b, _ = triples.size()
+
+        batch_nodes  = [s.item() for s, _, _ in triples]
+        batch_nodes += [o.item() for _, _, o in triples]
+
+        batch_nodes = list(batch_nodes)
+
+        # perform message passing
+        batch = Batch(batch_nodes, self.graph, self.embeddings, inv_graph=self.inv_graph)
+
+        for i, layer in enumerate(self.layers):
+            batch = layer(batch)
+
+        # extract embeddings
+        s = batch.embeddings()[:b, :]
+        o = batch.embeddings()[b:2*b, :]
+        p = self.relations[triples[:, 1], :]
+
+        scores = self.decoder(s, p, o)
+
+        assert scores.size() == (util.prod(dims),)
+
+        return scores.view(*dims)
 
 class Sample(nn.Module):
     """

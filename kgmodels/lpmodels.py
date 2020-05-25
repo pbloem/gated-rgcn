@@ -505,7 +505,7 @@ class LPNarrow(nn.Module):
         ]
         self.layers = nn.Sequential(*layers)
 
-        # layers to projetc to a smaller dim for message passing
+        # layers to project to a smaller dim for message passing
         self.tohidden, self.frhidden = nn.Linear(emb, hidden), nn.Linear(hidden, emb)
 
         self.relations = nn.Parameter(torch.FloatTensor(r, emb).uniform_(-init, init))

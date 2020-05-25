@@ -127,8 +127,10 @@ def go(arg):
                 triples=train, n=len(i2n), r=len(i2r), emb=arg.emb, hidden=arg.hidden, decomp=arg.decomp,
                 numbases=arg.num_bases, numblocks=arg.num_blocks, depth=arg.depth, do=arg.do, biases=arg.biases,
                 prune=arg.prune, edge_dropout=arg.edge_dropout)
-        elif arg.model == 'weighted':
-            pass
+        elif arg.model == 'sampling':
+            model = kgmodels.SimpleLP(
+                triples=train, n=len(i2n), r=len(i2r), emb=arg.emb, h=arg.hidden, ksample=arg.k
+                )
         else:
             raise Exception(f'model not recognized: {arg.model}')
 
@@ -457,6 +459,10 @@ if __name__ == "__main__":
                         help="Embedding dropout (applied just before encoder).",
                         default=None, type=float)
 
+    parser.add_argument("-k",
+                        dest="k",
+                        help="Number of edges to extend the batch by (per sampling layer).",
+                        default=15, type=int)
 
     options = parser.parse_args()
 

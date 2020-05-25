@@ -8,4 +8,4 @@ from .data import load, load_lp, random_graph, fan
 
 from .sampling import SamplingClassifier, Batch, convert
 
-from .simple import SimpleClassifier
+from .simple import SimpleClassifier, SimpleLP
