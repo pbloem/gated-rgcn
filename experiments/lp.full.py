@@ -129,7 +129,7 @@ def go(arg):
                 prune=arg.prune, edge_dropout=arg.edge_dropout)
         elif arg.model == 'sampling':
             model = kgmodels.SimpleLP(
-                triples=train, n=len(i2n), r=len(i2r), emb=arg.emb, h=arg.hidden, ksample=arg.k
+                triples=train, n=len(i2n), r=len(i2r), emb=arg.emb, h=arg.hidden, ksample=arg.k, csample=arg.c
                 )
         else:
             raise Exception(f'model not recognized: {arg.model}')
@@ -153,6 +153,11 @@ def go(arg):
 
             seeni, sumloss = 0, 0.0
 
+            if arg.c is not None:
+                tic()
+                model.precompute_globals()
+                print(f'precomp took {toc():.2}s')
+
             tsample, tforward, tbackward, ttotal, tloss, tstep = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
             for fr in trange(0, train.size(0), arg.batch):
 
@@ -160,10 +165,11 @@ def go(arg):
                 model.train(True)
 
                 if arg.limit is not None and seeni > arg.limit:
-                    break                # if torch.cuda.is_available() and random.random() < 0.01:
+                    break
+
+
+                # if torch.cuda.is_available() and random.random() < 0.01:
                 #     print(f'\nPeak gpu memory use is {torch.cuda.max_memory_cached() / 1e9:.2} Gb')
-
-
 
                 to = min(train.size(0), fr + arg.batch)
 
@@ -237,7 +243,7 @@ def go(arg):
                 seen += b; seeni += b
                 ttotal += toc()
 
-            print(f'epoch {e}; training loss {sumloss/seeni:.4}       s {tsample:.3}s, f {tforward:.3}s (loss {tloss:.3}s), b {tbackward:.3}, st {tstep:.3}, t {ttotal:.3}s')
+                print(f'epoch {e}; training loss {sumloss/seeni:.4}       s {tsample:.3}s, f {tforward:.3}s (loss {tloss:.3}s), b {tbackward:.3}, st {tstep:.3}, t {ttotal:.3}s')
 
             # Evaluate
             if (e % arg.eval_int == 0 and e !=0) or e == arg.epochs - 1:
@@ -363,7 +369,7 @@ if __name__ == "__main__":
 
     parser.add_argument("-D", "--dataset-name",
                         dest="name",
-                        help="Name of dataset to use [fb, wn]",
+                        help="Name of dataset to use [fb, wn, toy]",
                         default='fb', type=str)
 
     parser.add_argument("-m", "--model",
@@ -463,6 +469,11 @@ if __name__ == "__main__":
                         dest="k",
                         help="Number of edges to extend the batch by (per sampling layer).",
                         default=15, type=int)
+
+    parser.add_argument("-c",
+                        dest="c",
+                        help="Number of candidates to pre-select using precomputed scores.",
+                        default=None, type=int)
 
     options = parser.parse_args()
 

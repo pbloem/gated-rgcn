@@ -199,7 +199,7 @@ class Batch():
         :param bi:
         :param globals:
         :param rm_duplicates: Remove duplicates (increases memory)
-        :return:
+        :return: a generator over integer 3-tuples representing edges in data coordinates
         """
 
         seen = set()
@@ -233,6 +233,12 @@ class Batch():
         return inc_edges
 
     def add_edges(self, edges, bi):
+        """
+        Add edges (in graph coordinates) to the batch, for batch index bi
+        :param edges:
+        :param bi:
+        :return:
+        """
 
         new_nodes = set()
 
@@ -247,7 +253,9 @@ class Batch():
         self.toind += [(bi, n) for n in new_nodes]
         #-- for batch node b, self.toind[b] = (bi, n) represents the batch bi and data-node n
 
-        self.node_emb = torch.cat([self.node_emb, self.orig_embeddings[new_nodes, :]], dim=0) # TODO might be faster to re-slice the whole embedding matrix
+        self.node_emb = torch.cat([self.node_emb, self.orig_embeddings[new_nodes, :]], dim=0)
+        # -- might be faster to re-slice the whole embedding matrix
+
         self.frind = { (bj, e):i for i, (bj, e) in enumerate(self.toind)}
         self.nodesets[bi].update(new_nodes)
 
@@ -454,12 +462,16 @@ class SimpleLP(nn.Module):
         self.tokeys    = nn.Linear(emb, emb)
         self.toqueries = nn.Linear(emb, emb)
 
+        self.globals = {}
+
         layers = [
             Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
-                toqueries=self.toqueries, ksample=ksample, boost=boost, csample=csample, cls=self, **kwargs),
+                toqueries=self.toqueries, ksample=ksample, boost=boost, csample=csample,
+                cls=self, globals=self.globals, **kwargs),
 
             Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
-                toqueries=self.toqueries, ksample=ksample, boost=boost, csample=csample, cls=self, **kwargs),
+                toqueries=self.toqueries, ksample=ksample, boost=boost, csample=csample,
+                cls=self, globals=self.globals,  **kwargs),
 
             SimpleRGCN(self.graph, self.r, hfr=emb, hto=emb, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
                 toqueries=self.toqueries, bases=bases, dropout=dropout, cls=self, **kwargs),
@@ -473,6 +485,34 @@ class SimpleLP(nn.Module):
             self.decoder = distmult
         else:
             self.decoder = decoder
+
+    def precompute_globals(self):
+        """
+        Computes global weight for each edge based on the current embeddings. These are periodically updated (i.e.
+        once per epoch). These weights are gradient free, and for the batch (after sampling) the current embeddings
+        are used to compute the real global weights.
+
+        :return:
+        """
+
+        with torch.no_grad():
+
+            n, e = self.embeddings.size()
+
+            si, pi, oi = [s for s, _, _ in self.edges], [p for _, p, _ in self.edges], [o for _, _, o in self.edges]
+
+            semb, pemb, oemb, = self.embeddings[si, :], self.relations[pi, :], self.embeddings[oi, :]
+            gb, sb, pb, ob = self.gbias, self.sbias[si], self.pbias[pi], self.obias[oi]
+
+            semb = self.tokeys(semb)
+            oemb = self.toqueries(oemb)
+
+            dots = (semb * pemb * oemb).sum(dim=1) + sb + pb + ob + gb
+            dots = ACTIVATION(dots)
+
+            self.globals.clear()
+            for i, edge in enumerate(self.edges):
+                self.globals[tuple(edge)] = dots[i].item()
 
     def forward(self, triples):
 
@@ -514,7 +554,8 @@ class Sample(nn.Module):
     Samples a _fixed_ number of extra edges (if enough incident edges are available)
     """
 
-    def __init__(self, graph, nodes=None, relations=None, tokeys=None, toqueries=None, ksample=50, cls=None, **kwargs):
+    def __init__(self, graph, nodes=None, relations=None, tokeys=None, toqueries=None,
+                 ksample=50, cls=None, csample=None, globals=None, **kwargs):
         super().__init__()
 
         self.graph = graph
@@ -525,8 +566,11 @@ class Sample(nn.Module):
         self.toqueries = toqueries
 
         self.ksample = ksample
+        self.csample = csample
 
         self.gbias, self.sbias, self.pbias, self.obias = cls.gbias, cls.sbias, cls.pbias, cls.obias
+
+        self.globals = globals
 
     def forward(self, batch : Batch):
         """
@@ -541,7 +585,14 @@ class Sample(nn.Module):
 
         for bi in range(b):
 
-            cflat = list(batch.gen_inc_edges(bi))
+            if self.training and self.csample is not None:
+                # Sample a list of candidates using the pre-computed scores
+                cflat = wrs_gen(batch.gen_inc_edges(bi),
+                                weight_function=lambda edge : self.globals[edge],
+                                k=self.csample)
+            else:
+                cflat = list(batch.gen_inc_edges(bi))
+
 
             if len(cflat) == 0:
                 continue
@@ -586,7 +637,6 @@ class Sample(nn.Module):
                     print(cand_sampled.size(), cflat.size())
 
                 cand_sampled = [(s.item(), p.item(), o.item()) for s, p, o in cand_sampled]
-
             else:
                 cflat = torch.tensor(cflat)
                 cand_sampled = cflat
