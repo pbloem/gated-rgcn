@@ -15,8 +15,12 @@ import heapq
 import util
 from util import d, tic, toc
 
+from itertools import accumulate
+
 """
 TODO:
+
+Simplified version of the sampling RGCN.
 
 - Check equivalence to regular RGCN
  -- set sampling boost, max_edges high
@@ -32,6 +36,7 @@ TODO:
 """
 
 ACTIVATION = F.sigmoid
+flatten = lambda l: [item for sublist in l for item in sublist]
 
 def heapselect(generator, keyfunc, k):
     """
@@ -159,114 +164,126 @@ def convert_el(edges):
 
 class Batch():
     """
-    Maintains all relevant information about a batch of subgraphs.
+    Batch of edges.
+
+    Does not maintain embeddings.
+
+    A batch of I instances represents a subgraph with I disconnected components. We call this the "batch graph". This is
+    the graph over which we perform the convolution. "data indices" refer to nodes in the larger data graph, batch
+    indices refer to nodes in the batch graph. Note that while the batch graph represents I subgraphs (with I target
+    nodes) we think of it as a single graph with I disconnected components.
+
+    Currently, the s and o nodes are in the same subgraph. It may be better to sample separate subgraphs for each.
     """
 
-    def __init__(self, entities, graph, embeddings, inv_graph=None):
+    def __init__(self, triples, graph, inv_graph=None):
+        """
 
-        n, e = embeddings.size()
+        :param triples: list lists of three integers
+        :param graph:
+        :param inv_graph:
+        """
 
-        self.entities = entities
+        if type(triples) is torch.Tensor:
+            triples = triples.tolist()
 
-        self.nodesets = [set([node]) for node in entities]
-        self.edgesets = [set() for _ in entities]
+        assert type(triples) is list
 
-        # mapping from node indices in the batch graph to indices in the original graph
-        self.toind = [(bi, ent) for bi, ent in enumerate(entities)]
-        self.frind = {(bi, e):i for i, (bi, ent) in enumerate(self.toind)}
+        # these triples should be excluded from sampling (if they exist)
+        self.triples = [tuple(triple) for triple in triples] # -- convert to set of 3-tuples
+
+        # the nodes currently sampled (a set of nodes for each instance in the batch)
+        self.entities = [set([s, o]) for s, _, o in triples]
+
+        # the edges currently sampled (set for each instance)
+        self.edgesets = [set() for _ in triples]
 
         self.graph = graph
         self.inv_graph = invert_graph(graph) if inv_graph is None else inv_graph
 
-        self.orig_embeddings = embeddings
-
-        self.node_emb = embeddings[entities]
-
-        # edges of all subgraphs, with local (!) node indices
-        self.edges   = []
-
     def size(self):
         """
-        Number of batches
+        Number of instances in the batch
         :return:
         """
-        return len(self.edgesets)
+        return len(self.entities)
 
-    def gen_inc_edges(self, bi, rm_duplicates=True):
+    def num_nodes(self):
+        """
+        Total number of nodes in the batch graph (over all instances)
+        :return:
+        """
+        return sum([len(e) for e in self.entities])
+
+    def gen_inc_edges(self, bi, rm_duplicates=True, rm_seed=True):
         """
         Generates all new incident edges (in data coordinates).
 
         :param bi:
         :param globals:
         :param rm_duplicates: Remove duplicates (increases memory)
+        :param rm_seed: Do not generate the seed triple (the triple we're classifiying).
         :return: a generator over integer 3-tuples representing edges in data coordinates
         """
 
         seen = set()
 
-        for node in self.nodesets[bi]:
+        for node in self.entities[bi]:
             for edge in self.graph[node]:
-                if edge not in self.edgesets[bi]:
-                    if (not rm_duplicates) or edge not in seen:
-                        yield edge
-                        if rm_duplicates:
-                            seen.add(edge)
-
-        for node in self.nodesets[bi]:
-            for edge in self.inv_graph[node]:
-                if edge not in self.edgesets[bi]:
-                    if edge[0] != edge[2]: # We've seen these already
-                        if (not rm_duplicates) or edge not in seen:
+                if edge not in self.edgesets[bi]: # not already sampled
+                    if (not rm_duplicates) or edge not in seen: # not already seen
+                        if (not rm_seed) or edge != self.triples[bi]:
                             yield edge
                             if rm_duplicates:
                                 seen.add(edge)
 
-    def inc_edges(self, bi, prune=True):
-
-        inc_edges = set()
-
-        for node in self.nodesets[bi]:
-            inc_edges.update(self.graph[node])
-
-        if prune:
-            return self.prune(inc_edges, bi)
-        return inc_edges
+            for edge in self.inv_graph[node]:
+                if edge not in self.edgesets[bi]: # not already sampled
+                    if edge[0] != edge[2]: # We've seen these already
+                        if (not rm_duplicates) or edge not in seen: # not alrready seen
+                            if (not rm_seed) or edge != self.triples[bi]:
+                                yield edge
+                                if rm_duplicates:
+                                    seen.add(edge)
 
     def add_edges(self, edges, bi):
         """
-        Add edges (in graph coordinates) to the batch, for batch index bi
+        Add edges to the batch, for batch index bi
         :param edges:
         :param bi:
         :return:
         """
 
-        new_nodes = set()
-
-        for (s, p, o) in edges:
-            if s not in self.nodesets[bi]:
-                new_nodes.add(s)
-            if o not in self.nodesets[bi]:
-                new_nodes.add(o)
-
-        new_nodes = list(new_nodes)
-
-        self.toind += [(bi, n) for n in new_nodes]
-        #-- for batch node b, self.toind[b] = (bi, n) represents the batch bi and data-node n
-
-        self.node_emb = torch.cat([self.node_emb, self.orig_embeddings[new_nodes, :]], dim=0)
-        # -- might be faster to re-slice the whole embedding matrix
-
-        self.frind = { (bj, e):i for i, (bj, e) in enumerate(self.toind)}
-        self.nodesets[bi].update(new_nodes)
+        for s, _, o in edges:
+            self.entities[bi].add(s)
+            self.entities[bi].add(o)
 
         self.edgesets[bi].update(edges)
 
-        for s, p, o in edges:
-            self.edges.append((self.frind[(bi, s)], p, self.frind[(bi, o)]))
+        # new_nodes = set()
+        #
+        # for (s, p, o) in edges:
+        #     if s not in self.nodesets[bi]:
+        #         new_nodes.add(s)
+        #         new_nodes.add(o)
+        #
+        # new_nodes = list(new_nodes)
+        #
+        # self.toind += [(bi, n) for n in new_nodes]
+        #
+        # self.frind = { (bj, e):i for i, (bj, e) in enumerate(self.toind)}
+        # self.nodesets[bi].update(new_nodes)
+        #
+        # self.edgesets[bi].update(edges)
+        #
+        # for s, p, o in edges:
+        #     self.edges.append((self.frind[(bi, s)], p, self.frind[(bi, o)]))
 
     def prune(self, edges, bi):
         """
-        Removes any edges that are already in the batch.
+        Returns a set containing only those edges from the given collection that
+        are not already in this batch.
+
         :param edges:
         :return:
         """
@@ -278,81 +295,58 @@ class Batch():
 
         return result
 
-    def cflat(self):
+    def indices(self):
         """
-        Returns an (n, 3) tensor representing the currently selected triples,
+        Returns the data indices of the nodes in the batch graph.
 
-        --!! note that these are in batch coordinates
-        :return:
-        """
+        This can be used to select the node representations to be multiplied by the adjacency
+        matrix.
 
-        return torch.tensor(self.edges, dtype=torch.long, device=d())
-
-    def to_data_node(self, batch_node):
-        """
-        Converts a data node index to a batch node index
-        """
-        return self.toind[batch_node][1]
-
-    def to_data_nodes(self, batch_nodes):
-        """
-        Converts data node indices to batch indices
-
-        :param batch_nodes:
-        :return:
+        :return: A list of integers
         """
 
-        dnodes = [self.to_data_node(node) for node in batch_nodes]
+        return flatten([e for e in self.entities])
 
-        if isinstance(batch_nodes, torch.Tensor):
-            return torch.tensor(dnodes, dtype=torch.long, device=d(batch_nodes))
-        return dnodes
-
-    def to_data_edge(self, edge):
+    def batch_triples(self):
         """
-        Map an edge in the batch graph to the corresponding edge in the
-        :param edge:
-        :return:
-        """
-        if type(edge) == torch.Tensor:
-            assert edge.size() == (3, )
-            edge = (edge[0].item(), edge[1].item(), edge[2].item())
+        Returns the selected triples in batch indices.
 
-        s, p, o = edge
-        return self.to_data_node(s), p, self.to_data_node(o)
-
-    def embeddings(self):
-        """
-        Returns embeddings for the current node selection.
-
-        The first dimension corresponds to the batch coordinates
-
-        !! NOTE: The number of embeddings can be higher than the number of nodes in the original graph, since each batch
-        can have its own embeddings.
-        :return:
-        """
-
-        return self.node_emb
-
-    def num_nodes(self):
-        """
-        Number of nodes in the batch graph (by local index). Again, can theoretically be higher than the nr of nodes in
-        the original graph.
-
-        :return:
-        """
-        return self.node_emb.size(0)
-
-    def set_embeddings(self, nw_embs):
-        """
 
         :return:
         """
 
-        assert nw_embs.size() == self.node_emb.size()
+        n = sum([len(e) for e in self.entities])
 
-        self.node_emb = nw_embs
+        # -- create a map from data indices to batch indices (ignoring instances)
+        b2d = self.indices()
+        d2b = {di:bi for bi, di in enumerate(b2d)}
 
+        # -- translate triples to batch indices (keep relations as is)
+        return [(d2b[s], p, d2b[o]) for s, p, o in self.edges()]
+
+    def edges(self):
+        """
+        Returns the currently selected edges in data indices.
+
+        :return: A generator of integer triples.
+        """
+
+        for bi in range(self.size()):
+            for edge in self.edgesets[bi]:
+                yield edge
+
+
+    def target_indices(self):
+        """
+        Returns the indices of the target nodes in the batch graph.
+
+        :return: A list of pairs (subject, object) of integers. One pair for each
+        instance in the batch.
+        """
+        firsts = [0] + [len(nodes) for _, nodes in enumerate(self.entities)]
+        firsts = list(accumulate(firsts[:-1]))
+
+        return firsts, [f+1 for f in firsts]
 
 class SimpleClassifier(nn.Module):
     """
@@ -427,9 +421,11 @@ def distmult(s, p, o, biases=None):
     if biases is None:
         return (s * p * o).sum(dim=1)
 
-    gb, sb, pb, ob = biases
+    pass
 
-    return (s * p * o).sum(dim=1) + sb + pb + ob + gb
+    # gb, sb, pb, ob = biases
+    #
+    # return (s * p * o).sum(dim=1) + sb + pb + ob + gb
 
 
 class SimpleLP(nn.Module):
@@ -464,22 +460,19 @@ class SimpleLP(nn.Module):
 
         self.globals = {}
 
-        layers = [
-            Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
+        self.sample0 = Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
                 toqueries=self.toqueries, ksample=ksample, boost=boost, csample=csample,
-                cls=self, globals=self.globals, **kwargs),
+                cls=self, globals=self.globals, **kwargs)
 
-            Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
+        self.sample1 = Sample(self.graph, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
                 toqueries=self.toqueries, ksample=ksample, boost=boost, csample=csample,
-                cls=self, globals=self.globals,  **kwargs),
+                cls=self, globals=self.globals,  **kwargs)
 
-            SimpleRGCN(self.graph, self.r, hfr=emb, hto=emb, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
-                toqueries=self.toqueries, bases=bases, dropout=dropout, cls=self, **kwargs),
-
-            SimpleRGCN(self.graph, self.r, hfr=emb, hto=emb, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
+        self.rgcn0 = SimpleRGCN(self.graph, self.r, hfr=emb, hto=emb, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
                 toqueries=self.toqueries, bases=bases, dropout=dropout, cls=self, **kwargs)
-        ]
-        self.layers = nn.ModuleList(modules=layers)
+
+        self.rgcn1 = SimpleRGCN(self.graph, self.r, hfr=emb, hto=emb, nodes=self.embeddings, relations=self.relations, tokeys=self.tokeys,
+                toqueries=self.toqueries, bases=bases, dropout=dropout, cls=self, **kwargs)
 
         if decoder == 'distmult':
             self.decoder = distmult
@@ -502,12 +495,12 @@ class SimpleLP(nn.Module):
             si, pi, oi = [s for s, _, _ in self.edges], [p for _, p, _ in self.edges], [o for _, _, o in self.edges]
 
             semb, pemb, oemb, = self.embeddings[si, :], self.relations[pi, :], self.embeddings[oi, :]
-            gb, sb, pb, ob = self.gbias, self.sbias[si], self.pbias[pi], self.obias[oi]
+            # gb, sb, pb, ob = self.gbias, self.sbias[si], self.pbias[pi], self.obias[oi]
 
             semb = self.tokeys(semb)
             oemb = self.toqueries(oemb)
 
-            dots = (semb * pemb * oemb).sum(dim=1) + sb + pb + ob + gb
+            dots = (semb * pemb * oemb).sum(dim=1) # + sb + pb + ob + gb
             dots = ACTIVATION(dots)
 
             self.globals.clear()
@@ -524,21 +517,54 @@ class SimpleLP(nn.Module):
         triples = triples.reshape(-1, 3)
 
         b, _ = triples.size()
+        batch = Batch(triples=triples, graph=self.graph,  inv_graph=self.inv_graph)
 
-        batch_nodes  = [s.item() for s, _, _ in triples]
-        batch_nodes += [o.item() for _, _, o in triples]
+        # Sample
+        batch = self.sample0(batch)
+        batch = self.sample1(batch)
 
-        batch_nodes = list(batch_nodes)
+        # extract batch node embeddings
+        nodes = self.embeddings[batch.indices(), :]
 
-        # perform message passing
-        batch = Batch(batch_nodes, self.graph, self.embeddings, inv_graph=self.inv_graph)
+        # compute the edge weights
+        dtriples = torch.tensor(list(batch.edges()), device=d(), dtype=torch.long)
+        btriples = torch.tensor(batch.batch_triples(), device=d(), dtype=torch.long)
 
-        for i, layer in enumerate(self.layers):
-            batch = layer(batch)
+        # adjacency matrix indices
+        # -- repeans R times, vertically
+        bn = batch.num_nodes()
 
-        # extract embeddings
-        s = batch.embeddings()[:b, :]
-        o = batch.embeddings()[b:2*b, :]
+        fr = btriples[:, 0] + bn * btriples[:, 1]
+        to = btriples[:, 2]
+
+        indices = torch.cat([fr[:, None], to[:, None]], dim=1)
+
+        si, pi, oi = dtriples[:, 0], dtriples[:, 1], dtriples[:, 2]
+        semb, pemb, oemb = self.embeddings[si, :], self.relations[pi, :], self.embeddings[oi, :]
+
+        # compute the score (bilinear dot product)
+        semb = self.tokeys(semb)
+        oemb = self.toqueries(oemb)
+
+        dots = (semb * pemb * oemb).sum(dim=1)
+
+        values = torch.ones((indices.size(0),), device=d(), dtype=torch.float)
+        values = values / util.sum_sparse(indices, values, (r * bn, bn))
+
+        values *= ACTIVATION(dots)  # F.softplus(dots)
+
+        # Message passing
+
+        nodes = self.rgcn0(nodes, indices, values)
+        nodes = self.rgcn1(nodes, indices, values)
+
+        subjects, objects = batch.target_indices()
+
+        assert len(subjects) == len(objects) == triples.size(0)
+
+        # extract embeddings for target nodes
+        s = nodes[subjects, :]
+        o = nodes[objects, :]
         p = self.relations[triples[:, 1], :]
 
         scores = self.decoder(s, p, o)
@@ -581,7 +607,6 @@ class Sample(nn.Module):
         """
 
         b = batch.size()
-        n, e = batch.embeddings().size()
 
         for bi in range(b):
 
@@ -600,32 +625,25 @@ class Sample(nn.Module):
             if self.training:
 
                 cflat = torch.tensor(cflat)
-                # NOTE: Raw indices here
 
                 # Reservoir sampling with the actual weights
-                embeddings = self.nodes # raw embeddings (not batch embeddings)
-
                 si, pi, oi = \
-                    torch.tensor([s for s, _, _ in cflat], dtype=torch.long, device=d(batch.node_emb)), \
-                    torch.tensor([p for _, p, _ in cflat], dtype=torch.long, device=d(batch.node_emb)), \
-                    torch.tensor([o for _, _, o in cflat], dtype=torch.long, device=d(batch.node_emb))
+                    torch.tensor([s for s, _, _ in cflat], dtype=torch.long, device=d()), \
+                    torch.tensor([p for _, p, _ in cflat], dtype=torch.long, device=d()), \
+                    torch.tensor([o for _, _, o in cflat], dtype=torch.long, device=d())
 
-                # print(max(si), max(pi), max(oi))
-                # print(embeddings.size())
-
-                semb, pemb, oemb, = embeddings[si, :], self.relations[pi, :], embeddings[oi, :]
-                gb, sb, pb, ob = self.gbias, self.sbias[si], self.pbias[pi], self.obias[oi]
+                semb, pemb, oemb, = self.nodes[si, :], self.relations[pi, :], self.nodes[oi, :]
+                # gb, sb, pb, ob = self.gbias, self.sbias[si], self.pbias[pi], self.obias[oi]
 
                 # compute the score (bilinear dot product)
-                # semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
-                # oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
                 semb = self.tokeys(semb)
                 oemb = self.toqueries(oemb)
 
-                dots = (semb * pemb * oemb).sum(dim=1) + sb + pb + ob + gb
+                dots = (semb * pemb * oemb).sum(dim=1) # + sb + pb + ob + gb
                 dots = ACTIVATION(dots)
 
-                # WRS with a full sort (optimize later)
+                # WRS with a full sort
+                # -- could be optimized with a quickselect
                 u = torch.rand(*dots.size(), device=d(dots))
                 weights = u.log() / dots
 
@@ -638,7 +656,6 @@ class Sample(nn.Module):
 
                 cand_sampled = [(s.item(), p.item(), o.item()) for s, p, o in cand_sampled]
             else:
-                cflat = torch.tensor(cflat)
                 cand_sampled = cflat
 
             batch.add_edges(cand_sampled, bi)
@@ -678,65 +695,25 @@ class SimpleRGCN(nn.Module):
 
         self.gbias, self.sbias, self.pbias, self.obias = cls.gbias, cls.sbias, cls.pbias, cls.obias
 
-    def forward(self, batch : Batch):
 
-        n, r, hfr, hto = batch.num_nodes(), self.r, self.hfr, self.hto
-        cflat = batch.cflat()
-        #-- NB: these are batch indices
+    def forward(self, nodes, indices, values):
+        """
+        :param btriples: Batch graph triples as a 3-tensor
+        :param embeddings: Batch graph node embeddings
+        :return:
+        """
 
-        # convert to sparse matrix
-        fr = cflat[:, 0] + n * cflat[:, 1]
-        to = cflat[:, 2]
-        indices = torch.cat([fr[:, None], to[:, None]], dim=1)
-
-        # row normalize
-        if self.use_global_weights:
-
-            # use weighted message passing
-
-            # recompute the global weights
-            # -- these ones get gradients, so it's more efficient to recompute the small subset that
-            #    requires gradients.
-
-            embeddings = batch.embeddings()
-
-            #si, pi, oi = [s for s, _, _ in cflat], [p for _, p, _ in cflat], [o for _, _, o in cflat]
-
-            si, pi, oi = cflat[:, 0], cflat[:, 1], cflat[:, 0]
-
-            try:
-                semb, pemb, oemb = embeddings[si, :], self.relations[pi, :], embeddings[oi, :]
-
-            except Exception as e:
-                print(si.max(), pi.max(), oi.max())
-                print(embeddings.size())
-
-                raise e
-
-            gb, sb, pb, ob = self.gbias, self.sbias[batch.to_data_nodes(si)], self.pbias[pi], self.obias[batch.to_data_nodes(oi)]
-
-            # compute the score (bilinear dot product)
-            semb = torch.einsum('ij, nj -> ni', self.tokeys, semb)
-            oemb = torch.einsum('ij, nj -> ni', self.toqueries, oemb)
-
-            dots = (semb * pemb * oemb).sum(dim=1) + sb + pb + ob + gb
-            # dots = dots / e
-
-            values = torch.ones((indices.size(0), ), device=d(), dtype=torch.float)
-            values = values / util.sum_sparse(indices, values, (r * n, n))
-
-            values *= ACTIVATION(dots) # F.softplus(dots)
-        else:
-            values = torch.ones((indices.size(0), ), device=d(), dtype=torch.float)
-            values = values / util.sum_sparse(indices, values, (r * n, n))
+        n, r = nodes.size(0), self.r
+        
+        assert nodes.size(1) == self.hfr
 
         # perform message passing
         # TODO: if the input is high-dimensional, it's much more efficient to apply the weights first
-        output = util.spmm(indices, values, (n * r, n), batch.embeddings())
+        output = util.spmm(indices, values, (n * r, n), nodes)
 
-        assert output.size() == (r * n, hfr), f'{output.size()} {(r * n, hfr)}'
+        assert output.size() == (r * n, self.hfr), f'{output.size()} {(r * n, self.hfr)}'
 
-        output = output.view(r, n, hfr)
+        output = output.view(r, n, self.hfr)
 
         # compute weights from bases
         if self.bases is not None:
@@ -756,6 +733,4 @@ class SimpleRGCN(nn.Module):
 
         # assert batch.embeddings().size() == output.size(), f'{batch.embeddings().size()} {output.size()}'
 
-        batch.set_embeddings(output)
-
-        return batch
+        return output
