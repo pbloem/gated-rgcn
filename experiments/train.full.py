@@ -161,6 +161,7 @@ def go(arg):
             with torch.no_grad():
 
                 model.train(False)
+
                 cls = model()[train_idx, :]
                 agreement = cls.argmax(dim=1) == train_lbl
                 accuracy = float(agreement.sum()) / agreement.size(0)

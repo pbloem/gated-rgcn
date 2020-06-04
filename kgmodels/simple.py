@@ -622,7 +622,8 @@ class Sample(nn.Module):
             if len(cflat) == 0:
                 continue
 
-            if self.training:
+            if True: # self.training:
+                # TODO: figure out how to behave in inference mode
 
                 cflat = torch.tensor(cflat)
 
