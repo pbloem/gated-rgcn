@@ -129,7 +129,7 @@ def go(arg):
                 prune=arg.prune, edge_dropout=arg.edge_dropout)
         elif arg.model == 'sampling':
             model = kgmodels.SimpleLP(
-                triples=train, n=len(i2n), r=len(i2r), emb=arg.emb, h=arg.hidden, ksample=arg.k, csample=arg.c
+                triples=train, n=len(i2n), r=len(i2r), emb=arg.emb, h=arg.hidden, ksample=arg.k, csample=arg.c, multi=arg.multi
                 )
         else:
             raise Exception(f'model not recognized: {arg.model}')
@@ -474,6 +474,10 @@ if __name__ == "__main__":
                         dest="c",
                         help="Number of candidates to pre-select using precomputed scores.",
                         default=None, type=int)
+
+    parser.add_argument("--multi", dest="multi",
+                        help="Use multiprocessing for the sampling.",
+                        action="store_true")
 
     options = parser.parse_args()
 
