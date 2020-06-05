@@ -15,7 +15,7 @@ import heapq
 import util
 from util import d, tic, toc
 
-from torch.multiprocessing import Pool
+from multiprocessing import Pool
 
 from itertools import accumulate
 
