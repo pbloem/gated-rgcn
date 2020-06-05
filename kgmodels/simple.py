@@ -15,7 +15,7 @@ import heapq
 import util
 from util import d, tic, toc
 
-from torch.multiprocessing import Pool
+# from torch.multiprocessing import Pool
 
 from itertools import accumulate
 
@@ -556,7 +556,6 @@ class SimpleLP(nn.Module):
         values *= ACTIVATION(dots)  # F.softplus(dots)
 
         # Message passing
-
         nodes = self.rgcn0(nodes, indices, values)
         nodes = self.rgcn1(nodes, indices, values)
 
@@ -610,75 +609,63 @@ class Sample(nn.Module):
 
             print(f'Using {self.cpus_available} parallel processes.')
 
-    def extend(self, bi, batch : Batch):
-
-        if self.csample is not None:
-            # Sample a list of candidates using the pre-computed scores
-            cflat = wrs_gen(batch.gen_inc_edges(bi),
-                            weight_function=lambda edge: self.globals[edge],
-                            k=self.csample)
-
-        else:
-            cflat = list(batch.gen_inc_edges(bi))
-
-        if len(cflat) == 0:
-
-            return []
-
-        # TODO: figure out how to behave in inference mode
-        cflat = torch.tensor(cflat)
-
-        # Reservoir sampling with the actual weights
-        si, pi, oi = \
-            torch.tensor([s for s, _, _ in cflat], dtype=torch.long, device=d()), \
-            torch.tensor([p for _, p, _ in cflat], dtype=torch.long, device=d()), \
-            torch.tensor([o for _, _, o in cflat], dtype=torch.long, device=d())
-
-        semb, pemb, oemb, = self.nodes[si, :], self.relations[pi, :], self.nodes[oi, :]
-        # gb, sb, pb, ob = self.gbias, self.sbias[si], self.pbias[pi], self.obias[oi]
-
-        # compute the score (bilinear dot product)
-        semb = self.tokeys(semb)
-        oemb = self.toqueries(oemb)
-
-        dots = (semb * pemb * oemb).sum(dim=1)  # + sb + pb + ob + gb
-        dots = ACTIVATION(dots)
-
-        # WRS with a full sort
-        # -- could be optimized with a quickselect
-        u = torch.rand(*dots.size(), device=d(dots))
-        weights = u.log() / dots
-
-        weights, indices = torch.sort(weights, descending=True)
-        indices = indices[:self.ksample]
-
-        cand_sampled = cflat[indices, :]
-        if random.random() < 0.0:
-            print(cand_sampled.size(), cflat.size())
-
-        return [(s.item(), p.item(), o.item()) for s, p, o in cand_sampled]
+        self.kt = self.ct = 0.0
 
     def forward(self, batch : Batch):
-        """
 
-        :param batch:
-        :param globals: Estimate of the global attention
-        :return:
-        """
+        # select some candidates.
+        cflats = []
+        for bi in range(batch.size()):
 
-        b = batch.size()
+            if self.csample is not None:
+                # Sample a list of candidates using the pre-computed scores
+                cflat = wrs_gen(batch.gen_inc_edges(bi),
+                                weight_function=lambda edge: self.globals[edge],
+                                k=self.csample)
+            else:
+                cflat = list(batch.gen_inc_edges(bi))
 
-        if self.multi:
-            with torch.no_grad():
-                with Pool(self.cpus_available) as pool:
-                    res = pool.starmap(self.extend,  [(bi, batch) for bi in range(batch.size())] )
-        else:
-            res = [self.extend(bi, batch) for bi in range(batch.size())]
+            cflats.append(cflat)
 
-        for bi, cand_sampled in enumerate(res):
-            batch.add_edges(cand_sampled, bi)
+        # pad the candidates with zero triples
+        lens = [len(x) for x in cflats]
+        mx = max(lens)
+        cflats = [x + [(0, 0, 0)] * (mx - ln) for x, ln in zip(cflats, lens)]
+
+        with torch.no_grad():
+
+            all = torch.tensor(cflats, device=d(), dtype=torch.long)
+            assert all.size() == (batch.size(), mx, 3)
+
+            semb, pemb, oemb = self.nodes[all[:, :, 0]], self.relations[[all[:, :, 1]]], self.nodes[all[:, :, 2]]
+
+            # compute the score (bilinear dot product)
+            semb = self.tokeys(semb)
+            oemb = self.toqueries(oemb)
+
+            dots = (semb * pemb * oemb).sum(dim=2)  # + sb + pb + ob + gb
+            dots = ACTIVATION(dots)
+
+            u = torch.rand(*dots.size(), device=d(dots))
+            weights = u.log() / dots
+
+            weights, indices = torch.sort(weights, dim=1, descending=True)
+
+            indices = indices.tolist()
+
+        # rm any indices that are too high
+        indices = [[i for i in ind if i <  ln] for ind, ln in zip(indices, lens)]
+
+        # pick the first k
+        indices = [ind[:self.ksample] for ind in indices]
+
+        sampled = [[cflats[i][j] for j in ind]for i, ind in enumerate(indices)]
+
+        for bi, samp in enumerate(sampled):
+            batch.add_edges(samp, bi)
 
         return batch
+
 
 class SimpleRGCN(nn.Module):
     """
