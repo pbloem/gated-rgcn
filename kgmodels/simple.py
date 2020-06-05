@@ -15,7 +15,7 @@ import heapq
 import util
 from util import d, tic, toc
 
-# from torch.multiprocessing import Pool
+from torch.multiprocessing import Pool
 
 from itertools import accumulate
 
@@ -63,7 +63,7 @@ def heapselect(generator, keyfunc, k):
 
     return [pair[1] for pair in heap]
 
-def wrs_gen(elem, k, weight_function):
+def wrs_gen(elem, weight_function, k):
     """
     Weighted reservoir sampling over the given generator
 
@@ -611,21 +611,39 @@ class Sample(nn.Module):
 
         self.kt = self.ct = 0.0
 
+    def inner(self, i, batch):
+        return wrs_gen(batch.gen_inc_edges(i),
+                        weight_function=lambda edge: self.globals[edge],
+                        k=self.csample)
+
     def forward(self, batch : Batch):
+        """
+
+        :param batch:
+        :return:
+        """
 
         # select some candidates.
-        cflats = []
-        for bi in range(batch.size()):
 
-            if self.csample is not None:
-                # Sample a list of candidates using the pre-computed scores
-                cflat = wrs_gen(batch.gen_inc_edges(bi),
-                                weight_function=lambda edge: self.globals[edge],
-                                k=self.csample)
-            else:
-                cflat = list(batch.gen_inc_edges(bi))
 
-            cflats.append(cflat)
+        if self.multi:
+
+            with Pool(self.cpus_available) as pool:
+                cflats = pool.starmap(self.inner, [(i, batch) for i in range(batch.size())])
+
+        else:
+            cflats = []
+            for bi in range(batch.size()):
+
+                if self.csample is not None:
+                    # Sample a list of candidates using the pre-computed scores
+                    cflat = wrs_gen(batch.gen_inc_edges(bi),
+                                    weight_function=lambda edge: self.globals[edge],
+                                    k=self.csample)
+                else:
+                    cflat = list(batch.gen_inc_edges(bi))
+
+                cflats.append(cflat)
 
         # pad the candidates with zero triples
         lens = [len(x) for x in cflats]
