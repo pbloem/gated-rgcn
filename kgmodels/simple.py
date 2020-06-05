@@ -15,7 +15,7 @@ import heapq
 import util
 from util import d, tic, toc
 
-from multiprocessing import Pool
+from torch.multiprocessing import Pool
 
 from itertools import accumulate
 
@@ -625,37 +625,39 @@ class Sample(nn.Module):
             return []
 
             # TODO: figure out how to behave in inference mode
-        cflat = torch.tensor(cflat)
+        with torch.no_grad():
 
-        # Reservoir sampling with the actual weights
-        si, pi, oi = \
-            torch.tensor([s for s, _, _ in cflat], dtype=torch.long, device=d()), \
-            torch.tensor([p for _, p, _ in cflat], dtype=torch.long, device=d()), \
-            torch.tensor([o for _, _, o in cflat], dtype=torch.long, device=d())
+            cflat = torch.tensor(cflat)
 
-        semb, pemb, oemb, = self.nodes[si, :], self.relations[pi, :], self.nodes[oi, :]
-        # gb, sb, pb, ob = self.gbias, self.sbias[si], self.pbias[pi], self.obias[oi]
+            # Reservoir sampling with the actual weights
+            si, pi, oi = \
+                torch.tensor([s for s, _, _ in cflat], dtype=torch.long, device=d()), \
+                torch.tensor([p for _, p, _ in cflat], dtype=torch.long, device=d()), \
+                torch.tensor([o for _, _, o in cflat], dtype=torch.long, device=d())
 
-        # compute the score (bilinear dot product)
-        semb = self.tokeys(semb)
-        oemb = self.toqueries(oemb)
+            semb, pemb, oemb, = self.nodes[si, :], self.relations[pi, :], self.nodes[oi, :]
+            # gb, sb, pb, ob = self.gbias, self.sbias[si], self.pbias[pi], self.obias[oi]
 
-        dots = (semb * pemb * oemb).sum(dim=1)  # + sb + pb + ob + gb
-        dots = ACTIVATION(dots)
+            # compute the score (bilinear dot product)
+            semb = self.tokeys(semb)
+            oemb = self.toqueries(oemb)
 
-        # WRS with a full sort
-        # -- could be optimized with a quickselect
-        u = torch.rand(*dots.size(), device=d(dots))
-        weights = u.log() / dots
+            dots = (semb * pemb * oemb).sum(dim=1)  # + sb + pb + ob + gb
+            dots = ACTIVATION(dots)
 
-        weights, indices = torch.sort(weights, descending=True)
-        indices = indices[:self.ksample]
+            # WRS with a full sort
+            # -- could be optimized with a quickselect
+            u = torch.rand(*dots.size(), device=d(dots))
+            weights = u.log() / dots
 
-        cand_sampled = cflat[indices, :]
-        if random.random() < 0.0:
-            print(cand_sampled.size(), cflat.size())
+            weights, indices = torch.sort(weights, descending=True)
+            indices = indices[:self.ksample]
 
-        return [(s.item(), p.item(), o.item()) for s, p, o in cand_sampled]
+            cand_sampled = cflat[indices, :]
+            if random.random() < 0.0:
+                print(cand_sampled.size(), cflat.size())
+
+            return [(s.item(), p.item(), o.item()) for s, p, o in cand_sampled]
 
     def forward(self, batch : Batch):
         """
