@@ -521,8 +521,6 @@ class SimpleLP(nn.Module):
         b, _ = triples.size()
         batch = Batch(triples=triples, graph=self.graph,  inv_graph=self.inv_graph)
 
-        print(f'triples {triples.size()}')
-
         # Sample
         batch = self.sample0(batch)
         batch = self.sample1(batch)
@@ -731,8 +729,6 @@ class SimpleRGCN(nn.Module):
         n, r = nodes.size(0), self.r
         
         assert nodes.size(1) == self.hfr
-
-        print(f'indices size {indices.size()}\t nodes size {nodes.size()}.')
 
         # perform message passing
         # TODO: if the input is high-dimensional, it's much more efficient to apply the weights first

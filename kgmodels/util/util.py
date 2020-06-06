@@ -587,7 +587,7 @@ def batch(model, *inputs, batch_size=16):
         batches = [inp[fr:to] for inp in inputs]
 
         if torch.cuda.is_available():
-            batches = [inp.cuda() for inp in inputs]
+            batches = [btc.cuda() for btc in batches]
 
         outs.append(model(*batches).cpu())
 
