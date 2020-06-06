@@ -9,10 +9,6 @@ from torch import nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 
-import rdflib as rdf
-import pandas as pd
-import numpy as np
-
 import random, sys, tqdm, math, random
 from tqdm import trange
 
@@ -23,6 +19,8 @@ from argparse import ArgumentParser
 import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
+
+import multiprocessing as mp
 
 """
 Full batch RGCN training for link prediction
@@ -280,7 +278,9 @@ def go(arg):
                                 candidates = filter(raw_candidates, alltriples, (st, p, o))
 
                             candidates = torch.tensor(candidates)
-                            scores = util.batch(model, candidates, batch_size=arg.batch * 2 * (1 + ng))
+                            scores = util.batch(model, candidates, batch_size=arg.batch//2)
+                            # -- the batch size needs to be a little conservative here, due to the high variance in nr of
+                            #    triples sampled.
 
                             sorted_candidates = [tuple(p[0]) for p in sorted(zip(candidates.tolist(), scores.tolist()), key=lambda p : -p[1])]
 
@@ -309,6 +309,8 @@ def go(arg):
     print(f'mean test accuracy     {teacc.mean():.3} ({teacc.std():.3})  \t{test_accs}')
 
 if __name__ == "__main__":
+
+    mp.set_start_method('spawn')
 
     ## Parse the command line options
     parser = ArgumentParser()
