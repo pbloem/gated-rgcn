@@ -521,6 +521,8 @@ class SimpleLP(nn.Module):
         b, _ = triples.size()
         batch = Batch(triples=triples, graph=self.graph,  inv_graph=self.inv_graph)
 
+        print(f'triples {triples.size()}')
+
         # Sample
         batch = self.sample0(batch)
         batch = self.sample1(batch)
