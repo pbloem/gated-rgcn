@@ -278,7 +278,7 @@ def go(arg):
                                 candidates = filter(raw_candidates, alltriples, (st, p, o))
 
                             candidates = torch.tensor(candidates)
-                            scores = util.batch(model, candidates, batch_size=arg.batch * 2 * (1 + ng))
+                            scores = util.batch(model, candidates, batch_size=arg.batch * 2)
                             # -- the batch size needs to be a little conservative here, due to the high variance in nr of
                             #    triples sampled.
 
