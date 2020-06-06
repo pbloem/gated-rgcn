@@ -303,12 +303,14 @@ def distmult(triples, nodes, relations, biases=None):
     p = relations.index_select(dim=0, index=pi)
     o = nodes.index_select(dim=0,     index=oi)
 
+    baseterm = (s * p * o).sum(dim=1)
+
     if biases is None:
-        return (s * p * o).sum(dim=1)
+        return baseterm
 
     gb, sb, pb, ob = biases
 
-    return (s * p * o).sum(dim=1) + sb[si] + pb[pi] + ob[oi] + gb
+    return baseterm + sb[si] + pb[pi] + ob[oi] + gb
 
 def add_inverse_and_self(triples, n, r):
     """
@@ -330,6 +332,67 @@ def add_inverse_and_self(triples, n, r):
     assert slf.size() == (n, 3)
 
     return torch.cat([triples, slf, inv], dim=0)
+
+class LPShallow(nn.Module):
+    """
+    Link prediction model with no message passing
+
+    Outputs raw (linear) scores for the given triples.
+    """
+
+    def __init__(self, triples, n, r, embedding=512, decoder='distmult', do=None, init=0.85, biases=False, ):
+
+        super().__init__()
+
+        assert triples.dtype == torch.long
+
+        self.n, self.r = n, r
+        self.e = embedding
+
+        self.entities  = nn.Parameter(torch.FloatTensor(n, self.e).uniform_(-init, init))
+        self.relations = nn.Parameter(torch.FloatTensor(r, self.e).uniform_(-init, init))
+
+        if decoder == 'distmult':
+            self.decoder = distmult
+        else:
+            self.decoder = decoder
+
+
+        self.do = None if do is None else nn.Dropout(do)
+
+        self.biases = biases
+        if biases:
+            self.gbias = nn.Parameter(torch.zeros((1,)))
+            self.sbias = nn.Parameter(torch.zeros((n,)))
+            self.pbias = nn.Parameter(torch.zeros((r,)))
+            self.obias = nn.Parameter(torch.zeros((n,)))
+
+    def forward(self, batch):
+
+        assert batch.size(-1) == 3
+
+        n, r = self.n, self.r
+
+        dims = batch.size()[:-1]
+        batch = batch.reshape(-1, 3)
+        batchl = batch.tolist()
+
+        nodes, relations = self.entities, self.relations
+
+        if self.do is not None:
+            nodes = self.do(nodes)
+            relations = self.do(self.relations)
+
+        if self.biases:
+            biases = (self.gbias, self.sbias, self.pbias, self.obias)
+        else:
+            biases = None
+
+        scores = self.decoder(batch, nodes, relations, biases=biases)
+
+        assert scores.size() == (util.prod(dims), )
+
+        return scores.view(*dims)
 
 class LinkPrediction(nn.Module):
     """
