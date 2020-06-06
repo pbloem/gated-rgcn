@@ -730,7 +730,7 @@ class SimpleRGCN(nn.Module):
         
         assert nodes.size(1) == self.hfr
 
-        print(f'indices size {indices.size()}.')
+        print(f'indices size {indices.size()}\t nodes size {nodes.size()}.')
 
         # perform message passing
         # TODO: if the input is high-dimensional, it's much more efficient to apply the weights first
