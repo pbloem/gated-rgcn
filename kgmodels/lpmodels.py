@@ -340,7 +340,7 @@ class LPShallow(nn.Module):
     Outputs raw (linear) scores for the given triples.
     """
 
-    def __init__(self, triples, n, r, embedding=512, decoder='distmult', do=None, init=0.85, biases=False, ):
+    def __init__(self, triples, n, r, embedding=512, decoder='distmult', edropout=None, rdropout=None, init=0.85, biases=False, ):
 
         super().__init__()
 
@@ -358,7 +358,8 @@ class LPShallow(nn.Module):
             self.decoder = decoder
 
 
-        self.do = None if do is None else nn.Dropout(do)
+        self.edo = None if edropout is None else nn.Dropout(edropout)
+        self.rdo = None if rdropout is None else nn.Dropout(rdropout)
 
         self.biases = biases
         if biases:
@@ -379,9 +380,10 @@ class LPShallow(nn.Module):
 
         nodes, relations = self.entities, self.relations
 
-        if self.do is not None:
-            nodes = self.do(nodes)
-            relations = self.do(self.relations)
+        if self.edo is not None:
+            nodes = self.edo(nodes)
+        if self.rdo is not None:
+            relations = self.rdo(relations)
 
         if self.biases:
             biases = (self.gbias, self.sbias, self.pbias, self.obias)
@@ -393,6 +395,23 @@ class LPShallow(nn.Module):
         assert scores.size() == (util.prod(dims), )
 
         return scores.view(*dims)
+
+    def penalty(self, rweight, p, which):
+
+        # TODO implement weighted penalty
+
+        if which == 'entities':
+            params = self.entities
+        elif which == 'relations':
+            params = self.relations
+        else:
+            raise Exception()
+
+        if p % 2 == 1:
+            params = params.abs()
+
+        return (rweight / p) * (params ** p).sum()
+
 
 class LinkPrediction(nn.Module):
     """

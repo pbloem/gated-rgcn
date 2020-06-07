@@ -97,8 +97,8 @@ def go(arg):
         """
         if arg.model == 'distmult':
             model = kgmodels.LPShallow(
-                triples=train, n=len(i2n), r=len(i2r), embedding=arg.emb, do=arg.do, biases=arg.biases,
-                )
+                triples=train, n=len(i2n), r=len(i2r), embedding=arg.emb, biases=arg.biases,
+                edropout = arg.edo, rdropout=arg.rdo)
         else:
             raise Exception(f'model not recognized: {arg.model}')
 
@@ -107,13 +107,13 @@ def go(arg):
             model.cuda()
 
         if arg.opt == 'adam':
-            opt = torch.optim.Adam(model.parameters(), lr=arg.lr, weight_decay=arg.wd)
+            opt = torch.optim.Adam(model.parameters(), lr=arg.lr)
         elif arg.opt == 'adamw':
-            opt = torch.optim.AdamW(model.parameters(), lr=arg.lr, weight_decay=arg.wd)
+            opt = torch.optim.AdamW(model.parameters(), lr=arg.lr)
         elif arg.opt == 'adagrad':
-            opt = torch.optim.Adagrad(model.parameters(), lr=arg.lr, weight_decay=arg.wd)
+            opt = torch.optim.Adagrad(model.parameters(), lr=arg.lr)
         else:
-            raise Exception
+            raise Exception()
 
         sched = torch.optim.lr_scheduler.ReduceLROnPlateau(patience=arg.patience, optimizer=opt)
 
@@ -133,7 +133,6 @@ def go(arg):
                 # if arg.limit is not None and seeni > arg.limit:
                 #     break
 
-                #
                 # if torch.cuda.is_available() and random.random() < 0.01:
                 #     print(f'\nPeak gpu memory use is {torch.cuda.max_memory_cached() / 1e9:.2} Gb')
 
@@ -182,9 +181,11 @@ def go(arg):
                 elif arg.loss == 'ce':
                     loss = F.cross_entropy(out, labels)
 
-                if arg.l2weight is not None:
-                    l2 = sum([p.pow(2).sum() for p in model.parameters()])
-                    loss = loss + arg.l2weight * l2
+                if arg.reg_eweight is not None:
+                    loss += model.penalty(which='entities', p=arg.reg_exp, rweight=arg.reg_eweight)
+
+                if arg.reg_rweight is not None:
+                    loss += model.penalty(which='relations', p=arg.reg_exp, rweight=arg.reg_rweight)
 
                 loss.backward()
 
@@ -303,14 +304,20 @@ if __name__ == "__main__":
                         help="Number of negatives for every positive",
                         default=1, type=int)
 
-    parser.add_argument("--weight-decay",
-                        dest="wd",
-                        help="Weight decay (using AdamW implementation).",
-                        default=0.0, type=float)
+    parser.add_argument("--reg-exp",
+                        dest="reg_exp",
+                        help="Regularizer exponent (1, 2, 3)",
+                        default=2, type=int)
 
-    parser.add_argument("--l2-weight", dest="l2weight",
-                        help="Weight for explicit L2 loss term.",
-                        default=None, type=float)
+    parser.add_argument("--reg-eweight",
+                        dest="reg_eweight",
+                        help="Regularizer weight entities",
+                        default=0, type=float)
+
+    parser.add_argument("--reg-rweight",
+                        dest="reg_rweight",
+                        help="Regularizer weight relations",
+                        default=0, type=float)
 
     parser.add_argument("-D", "--dataset-name",
                         dest="name",
@@ -349,15 +356,20 @@ if __name__ == "__main__":
                         help="Learn bias parameters.",
                         action="store_true")
 
-    parser.add_argument("--dropout",
-                        dest="do",
-                        help="Embedding dropout (applied just before encoder).",
+    parser.add_argument("--edropout",
+                        dest="edo",
+                        help="Entity dropout (applied just before encoder).",
+                        default=None, type=float)
+
+    parser.add_argument("--rdropout",
+                        dest="rdo",
+                        help="Relation dropout (applied just before encoder).",
                         default=None, type=float)
 
     parser.add_argument("--patience",
                         dest="patience",
                         help="Plateau scheduler patience.",
-                        default=9, type=float)
+                        default=1, type=float)
 
     options = parser.parse_args()
 
