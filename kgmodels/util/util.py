@@ -7,6 +7,8 @@ from collections.abc import Iterable
 
 from torch import nn
 
+import re
+
 tics = []
 
 def tic():
@@ -593,3 +595,11 @@ def batch(model, *inputs, batch_size=16):
 
     return torch.cat(outs, dim=0)
 
+def get_slug(s):
+    """
+    Returns a simplified version of the given string that can serve as a filename or directory name.
+    :param s:
+    :return:
+    """
+    s = str(s).strip().replace(' ', '_')
+    return re.sub(r'(?u)[^-\w.]', '', s)

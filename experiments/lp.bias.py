@@ -1,7 +1,7 @@
 from _context import kgmodels
 
 from kgmodels import util
-from util import d, tic, toc
+from util import d, tic, toc, get_slug
 
 import torch
 
@@ -9,7 +9,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 
-import random, sys, tqdm, math, random
+import random, sys, tqdm, math, random, os
 from tqdm import trange
 
 import rgat
@@ -21,6 +21,8 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 
 import multiprocessing as mp
+
+from torch.utils.tensorboard import SummaryWriter
 
 """
 Experiment to see if bias terms help link prediction
@@ -69,6 +71,9 @@ def go(arg):
     global repeats
     repeats = arg.repeats
 
+    tbdir = arg.tb_dir if arg.tb_dir is not None else os.path.join('./runs', get_slug(arg))[:250]
+    tbw = SummaryWriter(log_dir=tbdir)
+
     dev = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     train_accs = []
@@ -112,10 +117,13 @@ def go(arg):
             opt = torch.optim.AdamW(model.parameters(), lr=arg.lr)
         elif arg.opt == 'adagrad':
             opt = torch.optim.Adagrad(model.parameters(), lr=arg.lr)
+        elif arg.opt == 'sgd':
+            opt = torch.optim.SGD(model.parameters(), lr=arg.lr, nesterov=True, momentum=arg.momentum)
         else:
             raise Exception()
 
-        sched = torch.optim.lr_scheduler.ReduceLROnPlateau(patience=arg.patience, optimizer=opt)
+        sched = torch.optim.lr_scheduler.ReduceLROnPlateau(patience=arg.patience, optimizer=opt) \
+            if arg.sched else None
 
         # nr of negatives sampled
         ng = arg.negative_rate
@@ -194,6 +202,7 @@ def go(arg):
                 opt.step()
 
                 seen += b; seeni += b
+                tbw.add_scalar('biases/train_loss', float(loss.item()), seen)
 
             # Evaluate
             if (e % arg.eval_int == 0 and e != 0) or e == arg.epochs - 1:
@@ -231,8 +240,6 @@ def go(arg):
 
                             candidates = torch.tensor(candidates)
                             scores = util.batch(model, candidates, batch_size=arg.batch * 2)
-                            # -- the batch size needs to be a little conservative here, due to the high variance in nr of
-                            #    triples sampled.
 
                             sorted_candidates = [tuple(p[0]) for p in sorted(zip(candidates.tolist(), scores.tolist()), key=lambda p : -p[1])]
 
@@ -254,7 +261,13 @@ def go(arg):
                     print(f'epoch {e}: MRR {mrr:.4}\t hits@1 {hitsat1:.4}\t  hits@3 {hitsat3:.4}\t  hits@10 {hitsat10:.4}')
                     print(f'   ranks : {ranks[:10]}')
 
-                    sched.step(mrr) # reduce lr if mrr stalls
+                    tbw.add_scalar('biases/mrr', mrr, e)
+                    tbw.add_scalar('biases/h@1', hitsat1, e)
+                    tbw.add_scalar('biases/h@3', hitsat3, e)
+                    tbw.add_scalar('biases/h@10', hitsat10, e)
+
+                    if sched is not None:
+                        sched.step(mrr) # reduce lr if mrr stalls
 
     print('training finished.')
 
@@ -343,6 +356,11 @@ if __name__ == "__main__":
                         help="Optimizer.",
                         default='adam', type=str)
 
+    parser.add_argument("--momentum",
+                        dest="momentum",
+                        help="Optimizer momentum (olny for SGD).",
+                        default=0.0, type=float)
+
     parser.add_argument("--loss",
                         dest="loss",
                         help="Which loss function to use (bce, ce).",
@@ -366,10 +384,18 @@ if __name__ == "__main__":
                         help="Relation dropout (applied just before encoder).",
                         default=None, type=float)
 
+    parser.add_argument("--sched", dest="sched",
+                        help="Enable scheduler.",
+                        action="store_true")
+
     parser.add_argument("--patience",
                         dest="patience",
                         help="Plateau scheduler patience.",
                         default=1, type=float)
+
+    parser.add_argument("-T", "--tb_dir", dest="tb_dir",
+                        help="Data directory",
+                        default=None)
 
     options = parser.parse_args()
 
