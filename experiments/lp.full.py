@@ -38,7 +38,7 @@ global repeats
 
 def corrupt(batch, n):
     """
-    Corrupts the negatives of a batch of triples (in place). The first copy of the triples is uncorrupted
+    Corrupts the negatives of a batch of triples (in place).
 
     :param batch_size:
     :param n: nr of nodes in the graph
@@ -78,8 +78,8 @@ def go(arg):
 
     dev = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    train_accs = []
-    test_accs = []
+    train_mrrs = []
+    test_mrrs = []
 
     train, test, (n2i, i2n), (r2i, i2r) = \
         kgmodels.load_lp(arg.name, final=arg.final)
@@ -127,7 +127,8 @@ def go(arg):
                 prune=arg.prune, edge_dropout=arg.edge_dropout)
         elif arg.model == 'sampling':
             model = kgmodels.SimpleLP(
-                triples=train, n=len(i2n), r=len(i2r), emb=arg.emb, h=arg.hidden, ksample=arg.k, csample=arg.c, multi=arg.multi
+                triples=train, n=len(i2n), r=len(i2r), emb=arg.emb, h=arg.hidden, ksample=arg.k, csample=arg.c, multi=arg.multi,
+                decoder=arg.decoder
                 )
         else:
             raise Exception(f'model not recognized: {arg.model}')
@@ -137,17 +138,27 @@ def go(arg):
             model.cuda()
 
         if arg.opt == 'adam':
-            opt = torch.optim.Adam(model.parameters(), lr=arg.lr, weight_decay=arg.wd)
+            opt = torch.optim.Adam(model.parameters(), lr=arg.lr)
         elif arg.opt == 'adamw':
-            opt = torch.optim.AdamW(model.parameters(), lr=arg.lr, weight_decay=arg.wd)
+            opt = torch.optim.AdamW(model.parameters(), lr=arg.lr)
+        elif arg.opt == 'adagrad':
+            opt = torch.optim.Adagrad(model.parameters(), lr=arg.lr)
+        elif arg.opt == 'sgd':
+            opt = torch.optim.SGD(model.parameters(), lr=arg.lr, nesterov=True, momentum=arg.momentum)
         else:
-            raise Exception
+            raise Exception()
 
         # nr of negatives sampled
         ng = arg.negative_rate
 
         seen = 0
-        for e in range(arg.epochs):
+        for e in range(sum(arg.epochs)):
+
+            depth = 0
+            if e > arg.epochs[0]:
+                depth = 1
+            if e > sum(arg.epochs[:2]):
+                depth = 2
 
             seeni, sumloss = 0, 0.0
 
@@ -184,7 +195,7 @@ def go(arg):
                         negatives = train[indices, :].view(b, ng, 3) # -- triples to be corrupted
 
                     else: # local corruption (directly corrupt the current batch)
-                        negatives = positives[:, None, :].expand(b, ng, 3).contiguous()
+                        negatives = positives.clone()[:, None, :].expand(b, ng, 3).contiguous()
 
                     corrupt(negatives, len(i2n))
 
@@ -210,7 +221,7 @@ def go(arg):
                 opt.zero_grad()
 
                 tic()
-                out = model(triples)
+                out = model(triples, depth=depth)
 
                 assert out.size() == (b, ng + 1)
 
@@ -241,10 +252,10 @@ def go(arg):
                 seen += b; seeni += b
                 ttotal += toc()
 
-            print(f'epoch {e}; training loss {sumloss/seeni:.4}       s {tsample:.3}s, f {tforward:.3}s (loss {tloss:.3}s), b {tbackward:.3}, st {tstep:.3}, t {ttotal:.3}s')
+            print(f'epoch {e} (d{depth}); training loss {sumloss/seeni:.4}       s {tsample:.3}s, f {tforward:.3}s (loss {tloss:.3}s), b {tbackward:.3}, st {tstep:.3}, t {ttotal:.3}s')
 
             # Evaluate
-            if (e % arg.eval_int == 0) or e == arg.epochs - 1:
+            if (e % arg.eval_int == 0 and e != 0) or e == sum(arg.epochs) - 1:
                 with torch.no_grad():
 
                     model.train(False)
@@ -278,7 +289,7 @@ def go(arg):
                                 candidates = filter(raw_candidates, alltriples, (st, p, o))
 
                             candidates = torch.tensor(candidates)
-                            scores = util.batch(model, candidates, batch_size=arg.batch * 2)
+                            scores = util.batch(model, candidates, batch_size=arg.batch * 2, depth=depth)
                             # -- the batch size needs to be a little conservative here, due to the high variance in nr of
                             #    triples sampled.
 
@@ -302,11 +313,12 @@ def go(arg):
                     print(f'epoch {e}: MRR {mrr:.4}\t hits@1 {hitsat1:.4}\t  hits@3 {hitsat3:.4}\t  hits@10 {hitsat10:.4}')
                     print(f'   ranks : {ranks[:10]}')
 
+                    test_mrrs.append(mrr)
+
     print('training finished.')
 
-    tracc, teacc = torch.tensor(train_accs), torch.tensor(test_accs)
-    print(f'mean training accuracy {tracc.mean():.3} ({tracc.std():.3})  \t{train_accs}')
-    print(f'mean test accuracy     {teacc.mean():.3} ({teacc.std():.3})  \t{test_accs}')
+    temrrs = torch.tensor(test_mrrs)
+    print(f'mean test MRR    {temrrs.mean():.3} ({temrrs.std():.3})  \t{test_mrrs}')
 
 if __name__ == "__main__":
 
@@ -317,8 +329,9 @@ if __name__ == "__main__":
 
     parser.add_argument("-e", "--epochs",
                         dest="epochs",
-                        help="Size (nr of dimensions) of the input.",
-                        default=150, type=int)
+                        help="For how many epochs to train at each depth.",
+                        nargs=3,
+                        default=[0, 0, 10], type=int)
 
     parser.add_argument("--eval-size",
                         dest="eval_size",
@@ -379,6 +392,11 @@ if __name__ == "__main__":
                         help="which model to use",
                         default='classic', type=str)
 
+    parser.add_argument("--decoder",
+                        dest="decoder",
+                        help="Whcih decoder to use (distmult, transe)",
+                        default='distmult', type=str)
+
     parser.add_argument("--indep",
                         dest="indep",
                         help="Learn independent attention weights for each edge instead of ones derived from node embeddings).",
@@ -422,6 +440,11 @@ if __name__ == "__main__":
                         dest="opt",
                         help="Optimizer.",
                         default='adamw', type=str)
+
+    parser.add_argument("--momentum",
+                        dest="momentum",
+                        help="Optimizer momentum (olny for SGD).",
+                        default=0.0, type=float)
 
     parser.add_argument("--loss",
                         dest="loss",

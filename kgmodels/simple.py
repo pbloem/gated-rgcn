@@ -191,7 +191,8 @@ class Batch():
 
         assert type(triples) is list
 
-        # these triples should be excluded from sampling (if they exist)
+        # The original triples
+        # -- these triples should be excluded from sampling (if they exist)
         self.triples = [tuple(triple) for triple in triples] # -- convert to set of 3-tuples
 
         # the nodes currently sampled (a set of nodes for each instance in the batch)
@@ -202,6 +203,14 @@ class Batch():
 
         self.graph = graph
         self.inv_graph = invert_graph(graph) if inv_graph is None else inv_graph
+
+    def entities_stable(self):
+        """
+        Returns the samples nodes as ordered lists.
+
+        :return:
+        """
+        return [sorted(list(nodes)) for nodes in self.entities ]
 
     def size(self):
         """
@@ -301,13 +310,18 @@ class Batch():
         """
         Returns the data indices of the nodes in the batch graph.
 
+        Flattening this list (with flatten()) gives a mapping from batch indices to data indices
+
         This can be used to select the node representations to be multiplied by the adjacency
         matrix.
 
-        :return: A list of integers
+        :return: a list of integers for each instance in the batch (put together in antoher list)
         """
 
-        return flatten([e for e in self.entities])
+        return [e for e in self.entities_stable()]
+        # -- we call entities_stable() to ensure that the nodes are always produced in the
+        #    same order. This way target_indices() can tell us which are the indices of
+        #    the nodes we're interested in.
 
     def batch_triples(self):
         """
@@ -320,7 +334,7 @@ class Batch():
         n = sum([len(e) for e in self.entities])
 
         # -- create a map from data indices to batch indices (ignoring instances)
-        b2d = self.indices()
+        b2d = flatten(self.indices())
         d2b = {di:bi for bi, di in enumerate(b2d)}
 
         # -- translate triples to batch indices (keep relations as is)
@@ -338,17 +352,26 @@ class Batch():
                 yield edge
 
 
-    def target_indices(self):
+    def target_indices(self, indices):
         """
         Returns the indices of the target nodes in the batch graph.
 
+        :param indices: A list of lists of indices as returned by indices()
         :return: A list of pairs (subject, object) of integers. One pair for each
         instance in the batch.
         """
-        firsts = [0] + [len(nodes) for _, nodes in enumerate(self.entities)]
-        firsts = list(accumulate(firsts[:-1]))
 
-        return firsts, [f+1 for f in firsts]
+        relative = [] # indices in the instance lists
+        for i, (s, _, o) in enumerate(self.triples):
+            relative.append((indices[i].index(s), indices[i].index(o)))
+
+        absolute = [] # indices in the flattened list
+        count = 0
+        for i, (s, o) in enumerate(relative):
+            absolute.append((s + count, o + count))
+            count += len(indices[i])
+
+        return relative, absolute
 
 class SimpleClassifier(nn.Module):
     """
@@ -429,6 +452,25 @@ def distmult(s, p, o, biases=None):
     #
     # return (s * p * o).sum(dim=1) + sb + pb + ob + gb
 
+def transe(s, p, o, biases=None):
+    """
+    Implements the distmult score function.
+
+    :param triples: batch of triples, (b, 3) integers
+    :param nodes: node embeddings
+    :param relations: relation embeddings
+    :return:
+    """
+
+    if biases is None:
+        return (s + p - o).norm(dim=1)
+
+    pass
+
+    # gb, sb, pb, ob = biases
+    #
+    # return (s * p * o).sum(dim=1) + sb + pb + ob + gb
+
 
 class SimpleLP(nn.Module):
     """
@@ -478,8 +520,10 @@ class SimpleLP(nn.Module):
 
         if decoder == 'distmult':
             self.decoder = distmult
+        elif decoder == 'transe':
+            self.decoder = transe
         else:
-            self.decoder = decoder
+            raise Exception()
 
     def precompute_globals(self):
         """
@@ -509,7 +553,7 @@ class SimpleLP(nn.Module):
             for i, edge in enumerate(self.edges):
                 self.globals[tuple(edge)] = dots[i].item()
 
-    def forward(self, triples):
+    def forward(self, triples, depth=2):
 
         assert triples.size(-1) == 3
 
@@ -522,51 +566,73 @@ class SimpleLP(nn.Module):
         batch = Batch(triples=triples, graph=self.graph,  inv_graph=self.inv_graph)
 
         # Sample
-        batch = self.sample0(batch)
-        batch = self.sample1(batch)
+        if depth > 0:
+            batch = self.sample0(batch)
+        if depth > 1:
+            batch = self.sample1(batch)
 
         # extract batch node embeddings
-        nodes = self.embeddings[batch.indices(), :]
 
-        # compute the edge weights
-        dtriples = torch.tensor(list(batch.edges()), device=d(), dtype=torch.long)
-        btriples = torch.tensor(batch.batch_triples(), device=d(), dtype=torch.long)
-
-        # adjacency matrix indices
-        # -- repeans R times, vertically
-        bn = batch.num_nodes()
-
-        fr = btriples[:, 0] + bn * btriples[:, 1]
-        to = btriples[:, 2]
-
-        indices = torch.cat([fr[:, None], to[:, None]], dim=1)
-
-        si, pi, oi = dtriples[:, 0], dtriples[:, 1], dtriples[:, 2]
-        semb, pemb, oemb = self.embeddings[si, :], self.relations[pi, :], self.embeddings[oi, :]
-
-        # compute the score (bilinear dot product)
-        semb = self.tokeys(semb)
-        oemb = self.toqueries(oemb)
-
-        dots = (semb * pemb * oemb).sum(dim=1)
-
-        values = torch.ones((indices.size(0),), device=d(), dtype=torch.float)
-        values = values / util.sum_sparse(indices, values, (r * bn, bn))
-
-        values *= ACTIVATION(dots)  # F.softplus(dots)
+        bind = batch.indices()
+        nodes = self.embeddings[flatten(bind), :]
 
         # Message passing
-        nodes = self.rgcn0(nodes, indices, values)
-        nodes = self.rgcn1(nodes, indices, values)
+        if depth > 0:
 
-        subjects, objects = batch.target_indices()
+            # compute the edge weights
+            dtriples = torch.tensor(list(batch.edges()), device=d(), dtype=torch.long)
+            btriples = torch.tensor(batch.batch_triples(), device=d(), dtype=torch.long)
+
+            # adjacency matrix indices
+            # -- repeans R times, vertically
+            bn = batch.num_nodes()
+
+            fr = btriples[:, 0] + bn * btriples[:, 1]
+            to = btriples[:, 2]
+
+            indices = torch.cat([fr[:, None], to[:, None]], dim=1)
+
+            si, pi, oi = dtriples[:, 0], dtriples[:, 1], dtriples[:, 2]
+            semb, pemb, oemb = self.embeddings[si, :], self.relations[pi, :], self.embeddings[oi, :]
+
+            # compute the score (bilinear dot product)
+            semb = self.tokeys(semb)
+            oemb = self.toqueries(oemb)
+
+            dots = (semb * pemb * oemb).sum(dim=1)
+
+            values = torch.ones((indices.size(0),), device=d(), dtype=torch.float)
+            values = values / util.sum_sparse(indices, values, (r * bn, bn))
+
+            values *= ACTIVATION(dots)  # F.softplus(dots)
+
+            nodes = nodes + self.rgcn0(nodes, indices, values)
+
+            if depth > 1:
+                nodes = nodes + self.rgcn1(nodes, indices, values)
+
+
+        _, tind = batch.target_indices(bind)
+        # -- indices of the target nodes in the list `bind`
+
+        subjects, objects = [t[0] for t in tind], [t[1]  for t in tind]
 
         assert len(subjects) == len(objects) == triples.size(0)
+        # print(nodes.size())
 
         # extract embeddings for target nodes
-        s = nodes[subjects, :]
-        o = nodes[objects, :]
-        p = self.relations[triples[:, 1], :]
+        try:
+            s = nodes[subjects, :]
+            o = nodes[objects, :]
+            p = self.relations[triples[:, 1], :]
+        except Exception as e:
+            print(triples.size())
+            print(batch.size())
+            print(nodes.size())
+            print(len(batch.indices()))
+            print(batch.entities)
+
+            raise(e)
 
         scores = self.decoder(s, p, o)
 

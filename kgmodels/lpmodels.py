@@ -281,7 +281,7 @@ class RGCNPruning(nn.Module):
 
         return out + self.bias
 
-def distmult(triples, nodes, relations, biases=None):
+def distmult(triples, nodes, relations, biases=None, forward=True):
     """
     Implements the distmult score function.
 
@@ -293,8 +293,9 @@ def distmult(triples, nodes, relations, biases=None):
 
     b, _ = triples.size()
 
-    with torch.no_grad():
-        si, pi, oi = triples[:, 0], triples[:, 1], triples[:, 2]
+    a, b = (0, 2) if forward else (2, 0)
+
+    si, pi, oi = triples[:, a], triples[:, 1], triples[:, b]
 
     # s, p, o = nodes[s, :], relations[p, :], nodes[o, :]
 
@@ -304,6 +305,38 @@ def distmult(triples, nodes, relations, biases=None):
     o = nodes.index_select(dim=0,     index=oi)
 
     baseterm = (s * p * o).sum(dim=1)
+
+    if biases is None:
+        return baseterm
+
+    gb, sb, pb, ob = biases
+
+    return baseterm + sb[si] + pb[pi] + ob[oi] + gb
+
+def transe(triples, nodes, relations, biases=None, forward=True):
+    """
+    Implements the distmult score function.
+
+    :param triples: batch of triples, (b, 3) integers
+    :param nodes: node embeddings
+    :param relations: relation embeddings
+    :return:
+    """
+
+    b, _ = triples.size()
+
+    a, b = (0, 2) if forward else (2, 0)
+
+    si, pi, oi = triples[:, a], triples[:, 1], triples[:, b]
+
+    # s, p, o = nodes[s, :], relations[p, :], nodes[o, :]
+
+    # faster?
+    s = nodes.index_select(dim=0,     index=si)
+    p = relations.index_select(dim=0, index=pi)
+    o = nodes.index_select(dim=0,     index=oi)
+
+    baseterm = (s + p - o).norm(p=2, dim=1)
 
     if biases is None:
         return baseterm
@@ -340,7 +373,7 @@ class LPShallow(nn.Module):
     Outputs raw (linear) scores for the given triples.
     """
 
-    def __init__(self, triples, n, r, embedding=512, decoder='distmult', edropout=None, rdropout=None, init=0.85, biases=False, ):
+    def __init__(self, triples, n, r, embedding=512, decoder='distmult', edropout=None, rdropout=None, init=0.85, biases=False, reciprocal=False):
 
         super().__init__()
 
@@ -348,15 +381,19 @@ class LPShallow(nn.Module):
 
         self.n, self.r = n, r
         self.e = embedding
+        self.reciprocal = reciprocal
 
         self.entities  = nn.Parameter(torch.FloatTensor(n, self.e).uniform_(-init, init))
         self.relations = nn.Parameter(torch.FloatTensor(r, self.e).uniform_(-init, init))
+        if reciprocal:
+            self.relations_backward = nn.Parameter(torch.FloatTensor(r, self.e).uniform_(-init, init))
 
         if decoder == 'distmult':
             self.decoder = distmult
+        elif decoder == 'transe':
+            self.decoder = transe
         else:
-            self.decoder = decoder
-
+            raise Exception()
 
         self.edo = None if edropout is None else nn.Dropout(edropout)
         self.rdo = None if rdropout is None else nn.Dropout(rdropout)
@@ -365,10 +402,15 @@ class LPShallow(nn.Module):
         if biases:
             self.gbias = nn.Parameter(torch.zeros((1,)))
             self.sbias = nn.Parameter(torch.zeros((n,)))
-            self.pbias = nn.Parameter(torch.zeros((r,)))
             self.obias = nn.Parameter(torch.zeros((n,)))
+            self.pbias = nn.Parameter(torch.zeros((r,)))
+
+            if reciprocal:
+                self.pbias_bw = nn.Parameter(torch.zeros((r,)))
 
     def forward(self, batch):
+
+        scores = 0
 
         assert batch.size(-1) == 3
 
@@ -376,23 +418,31 @@ class LPShallow(nn.Module):
 
         dims = batch.size()[:-1]
         batch = batch.reshape(-1, 3)
-        batchl = batch.tolist()
 
-        nodes, relations = self.entities, self.relations
+        for forward in [True, False] if self.reciprocal else [True]:
 
-        if self.edo is not None:
-            nodes = self.edo(nodes)
-        if self.rdo is not None:
-            relations = self.rdo(relations)
+            nodes = self.entities
+            relations = self.relations if forward else self.relations_backward
 
-        if self.biases:
-            biases = (self.gbias, self.sbias, self.pbias, self.obias)
-        else:
-            biases = None
+            if self.edo is not None:
+                nodes = self.edo(nodes)
+            if self.rdo is not None:
+                relations = self.rdo(relations)
 
-        scores = self.decoder(batch, nodes, relations, biases=biases)
+            if self.biases:
+                if forward:
+                    biases = (self.gbias, self.sbias, self.pbias,    self.obias)
+                else:
+                    biases = (self.gbias, self.sbias, self.pbias_bw, self.obias)
+            else:
+                biases = None
 
-        assert scores.size() == (util.prod(dims), )
+            scores = scores + self.decoder(batch, nodes, relations, biases=biases, forward=forward)
+
+            assert scores.size() == (util.prod(dims), )
+
+        if self.reciprocal:
+            scores = scores / 2
 
         return scores.view(*dims)
 
@@ -401,16 +451,19 @@ class LPShallow(nn.Module):
         # TODO implement weighted penalty
 
         if which == 'entities':
-            params = self.entities
+            params = [self.entities]
         elif which == 'relations':
-            params = self.relations
+            if self.reciprocal:
+                params = [self.relations, self.relations_backward]
+            else:
+                params = [self.relations]
         else:
             raise Exception()
 
         if p % 2 == 1:
-            params = params.abs()
+            params = [p.abs() for p in params]
 
-        return (rweight / p) * (params ** p).sum()
+        return (rweight / p) * sum([(p ** p).sum() for p in params])
 
 
 class LinkPrediction(nn.Module):

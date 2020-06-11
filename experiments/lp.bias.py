@@ -76,8 +76,7 @@ def go(arg):
 
     dev = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    train_accs = []
-    test_accs = []
+    test_mrrs = []
 
     train, test, (n2i, i2n), (r2i, i2r) = \
         kgmodels.load_lp(arg.name, final=arg.final)
@@ -100,12 +99,9 @@ def go(arg):
         """
         Define model
         """
-        if arg.model == 'distmult':
-            model = kgmodels.LPShallow(
-                triples=train, n=len(i2n), r=len(i2r), embedding=arg.emb, biases=arg.biases,
-                edropout = arg.edo, rdropout=arg.rdo)
-        else:
-            raise Exception(f'model not recognized: {arg.model}')
+        model = kgmodels.LPShallow(
+            triples=train, n=len(i2n), r=len(i2r), embedding=arg.emb, biases=arg.biases,
+            edropout = arg.edo, rdropout=arg.rdo, decoder=arg.decoder)
 
         if torch.cuda.is_available():
             prt('Using CUDA.')
@@ -127,6 +123,7 @@ def go(arg):
 
         # nr of negatives sampled
         ng = arg.negative_rate
+        weight = torch.tensor([arg.nweight, 1.0], device=d()) if arg.nweight else None
 
         seen = 0
         for e in range(arg.epochs):
@@ -157,7 +154,7 @@ def go(arg):
                         negatives = train[indices, :].view(b, ng, 3) # -- triples to be corrupted
 
                     else: # local corruption (directly corrupt the current batch)
-                        negatives = positives[:, None, :].expand(b, ng, 3).contiguous()
+                        negatives = positives.clone()[:, None, :].expand(b, ng, 3).contiguous()
 
                     corrupt(negatives, len(i2n))
 
@@ -185,7 +182,7 @@ def go(arg):
                 assert out.size() == (b, ng + 1)
 
                 if arg.loss == 'bce':
-                    loss = F.binary_cross_entropy_with_logits(out, labels)
+                    loss = F.binary_cross_entropy_with_logits(out, labels, weight=weight)
                 elif arg.loss == 'ce':
                     loss = F.cross_entropy(out, labels)
 
@@ -269,11 +266,13 @@ def go(arg):
                     if sched is not None:
                         sched.step(mrr) # reduce lr if mrr stalls
 
+                    test_mrrs.append(mrr)
+
     print('training finished.')
 
-    tracc, teacc = torch.tensor(train_accs), torch.tensor(test_accs)
-    print(f'mean training accuracy {tracc.mean():.3} ({tracc.std():.3})  \t{train_accs}')
-    print(f'mean test accuracy     {teacc.mean():.3} ({teacc.std():.3})  \t{test_accs}')
+    temrrs = torch.tensor(test_mrrs)
+    print(f'mean test MRR    {temrrs.mean():.3} ({temrrs.std():.3})  \t{test_mrrs}')
+
 
 if __name__ == "__main__":
 
@@ -342,6 +341,11 @@ if __name__ == "__main__":
                         help="which model to use",
                         default='classic', type=str)
 
+    parser.add_argument("--dec",
+                        dest="decoder",
+                        help="Which decoding function to use (distmult, transe)",
+                        default='distmult', type=str)
+
     parser.add_argument("-F", "--final", dest="final",
                         help="Use the canonical test set instead of a validation split.",
                         action="store_true")
@@ -388,14 +392,25 @@ if __name__ == "__main__":
                         help="Enable scheduler.",
                         action="store_true")
 
+    parser.add_argument("--reciprocal", dest="reciprocal",
+                        help="Learn reciprocal relations.",
+                        action="store_true")
+
     parser.add_argument("--patience",
                         dest="patience",
                         help="Plateau scheduler patience.",
                         default=1, type=float)
 
+    parser.add_argument("--nweight",
+                        dest="nweight",
+                        help="Weight of negative samples (BCE loss only).",
+                        default=None, type=float)
+
     parser.add_argument("-T", "--tb_dir", dest="tb_dir",
                         help="Data directory",
                         default=None)
+
+
 
     options = parser.parse_args()
 

@@ -571,7 +571,7 @@ def prod(array):
         p *= e
     return p
 
-def batch(model, *inputs, batch_size=16):
+def batch(model, *inputs, batch_size=16, **kwargs):
     """
     Batch forward.
 
@@ -591,7 +591,7 @@ def batch(model, *inputs, batch_size=16):
         if torch.cuda.is_available():
             batches = [btc.cuda() for btc in batches]
 
-        outs.append(model(*batches).cpu())
+        outs.append(model(*batches, **kwargs).cpu())
 
     return torch.cat(outs, dim=0)
 
