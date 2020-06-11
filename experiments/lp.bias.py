@@ -266,7 +266,7 @@ def go(arg):
                     if sched is not None:
                         sched.step(mrr) # reduce lr if mrr stalls
 
-                    test_mrrs.append(mrr)
+        test_mrrs.append(mrr)
 
     print('training finished.')
 
