@@ -36,6 +36,11 @@ EPSILON = 0.000000001
 
 global repeats
 
+def set_lr(opt, lr):
+
+    for param_group in opt.param_groups:
+        param_group['lr'] = lr
+
 def corrupt(batch, n):
     """
     Corrupts the negatives of a batch of triples (in place).
@@ -138,13 +143,13 @@ def go(arg):
             model.cuda()
 
         if arg.opt == 'adam':
-            opt = torch.optim.Adam(model.parameters(), lr=arg.lr)
+            opt = torch.optim.Adam(model.parameters(), lr=arg.lr[0])
         elif arg.opt == 'adamw':
-            opt = torch.optim.AdamW(model.parameters(), lr=arg.lr)
+            opt = torch.optim.AdamW(model.parameters(), lr=arg.lr[0])
         elif arg.opt == 'adagrad':
-            opt = torch.optim.Adagrad(model.parameters(), lr=arg.lr)
+            opt = torch.optim.Adagrad(model.parameters(), lr=arg.lr[0])
         elif arg.opt == 'sgd':
-            opt = torch.optim.SGD(model.parameters(), lr=arg.lr, nesterov=True, momentum=arg.momentum)
+            opt = torch.optim.SGD(model.parameters(), lr=arg.lr[0], nesterov=True, momentum=arg.momentum)
         else:
             raise Exception()
 
@@ -155,10 +160,13 @@ def go(arg):
         for e in range(sum(arg.epochs)):
 
             depth = 0
+            set_lr(opt, arg.lr[0])
             if e > arg.epochs[0]:
                 depth = 1
+                set_lr(opt, arg.lr[1])
             if e > sum(arg.epochs[:2]):
                 depth = 2
+                set_lr(opt, arg.lr[2])
 
             seeni, sumloss = 0, 0.0
 
@@ -365,8 +373,10 @@ if __name__ == "__main__":
 
     parser.add_argument("-l", "--learn-rate",
                         dest="lr",
-                        help="Learning rate",
-                        default=0.001, type=float)
+                        help="Learning rates",
+                        default=[0.1, 0.001, 0.00001],
+                        nargs=3,
+                        type=float)
 
     parser.add_argument("-N", "--negative-rate",
                         dest="negative_rate",
