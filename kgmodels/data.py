@@ -215,6 +215,34 @@ def load_strings(file):
     with open(file, 'r') as f:
         return [line.split() for line in f]
 
+def load_lp_random(N=50, ptest=0.2):
+
+    train, test = [], []
+
+    subjects = list(range(N))
+    objects  = list(range(N,   2*N))
+    thirds   = list(range(2*N, 3*N))
+
+    for s, o, t in zip(subjects, objects, thirds):
+        train.append((t, 1, s))
+        train.append((t, 2, o))
+
+        dataset = train if random.random() > ptest else test
+
+        dataset.append((s, 0, o))
+
+
+    i2n = [str(ind) for ind in range(3*N)]
+    n2i = {n:i for i, n in enumerate(i2n)}
+
+    i2r = [0, 1, 2]
+    r2i = {r: i for i, r in enumerate(i2r)}
+
+    train = torch.tensor(train)
+    test = torch.tensor(test)
+
+    return train, test, (n2i, i2n), (r2i, i2r)
+
 def load_lp(name, final=False, limit=None, bidir=False, prune=False):
     """
     Loads a knowledge graph dataset. Self connections are NOT automatically added
@@ -226,7 +254,10 @@ def load_lp(name, final=False, limit=None, bidir=False, prune=False):
     :return: two lists of triples (train, test), two pairs of dicts for nodes and relations
     """
 
-    if name == 'fb': # Freebae 15k 237
+    if name == 'random':
+        return load_lp_random()
+
+    if name == 'fb': # Freebase 15k 237
         train_file = util.here('data/fb15k237/train.txt')
         val_file = util.here('data/fb15k237/valid.txt')
         test_file = util.here('data/fb15k237/test.txt')

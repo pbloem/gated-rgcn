@@ -206,7 +206,7 @@ class Batch():
 
     def entities_stable(self):
         """
-        Returns the samples nodes as ordered lists.
+        Returns the sampled nodes as ordered lists.
 
         :return:
         """
@@ -525,6 +525,9 @@ class SimpleLP(nn.Module):
         else:
             raise Exception()
 
+        self.dropout = None if dropout is None else nn.Dropout(dropout)
+
+
     def precompute_globals(self):
         """
         Computes global weight for each edge based on the current embeddings. These are periodically updated (i.e.
@@ -547,7 +550,7 @@ class SimpleLP(nn.Module):
             oemb = self.toqueries(oemb)
 
             dots = (semb * pemb * oemb).sum(dim=1) # + sb + pb + ob + gb
-            dots = ACTIVATION(dots)
+            dots = dots.abs()
 
             self.globals.clear()
             for i, edge in enumerate(self.edges):
@@ -576,6 +579,9 @@ class SimpleLP(nn.Module):
         bind = batch.indices()
         nodes = self.embeddings[flatten(bind), :]
 
+        if self.dropout is not None:
+            nodes = self.dropout(nodes)
+
         # Message passing
         if depth > 0:
 
@@ -602,9 +608,10 @@ class SimpleLP(nn.Module):
             dots = (semb * pemb * oemb).sum(dim=1)
 
             values = torch.ones((indices.size(0),), device=d(), dtype=torch.float)
+            # values = (dots).abs()
             values = values / util.sum_sparse(indices, values, (r * bn, bn))
 
-            values *= ACTIVATION(dots)  # F.softplus(dots)
+            # values *= ACTIVATION(dots)  # F.softplus(dots)
 
             nodes = nodes + self.rgcn0(nodes, indices, values)
 
@@ -668,12 +675,13 @@ class Sample(nn.Module):
         self.globals = globals
 
         if multi:
-            if 'sched_affinity' in dir(os):
-                self.cpus_available = os.sched_getaffinity(0)
-            else:
-                self.cpus_available = os.cpu_count()
-
-            print(f'Using {self.cpus_available} parallel processes.')
+            raise Exception('Not implemented')
+            # if 'sched_affinity' in dir(os):
+            #     self.cpus_available = os.sched_getaffinity(0)
+            # else:
+            #     self.cpus_available = os.cpu_count()
+            #
+            # print(f'Using {self.cpus_available} parallel processes.')
 
         self.kt = self.ct = 0.0
 
@@ -690,12 +698,10 @@ class Sample(nn.Module):
         """
 
         # select some candidates.
-
-
         if self.multi:
-
-            with Pool(self.cpus_available) as pool:
-                cflats = pool.starmap(self.inner, [(i, batch) for i in range(batch.size())])
+            raise Exception()
+            # with Pool(self.cpus_available) as pool:
+            #     cflats = pool.starmap(self.inner, [(i, batch) for i in range(batch.size())])
 
         else:
             cflats = []
@@ -717,8 +723,10 @@ class Sample(nn.Module):
         cflats = [x + [(0, 0, 0)] * (mx - ln) for x, ln in zip(cflats, lens)]
 
         with torch.no_grad():
+            #- compute the attention weights
 
             all = torch.tensor(cflats, device=d(), dtype=torch.long)
+
             assert all.size() == (batch.size(), mx, 3)
 
             semb, pemb, oemb = self.nodes[all[:, :, 0]], self.relations[[all[:, :, 1]]], self.nodes[all[:, :, 2]]
@@ -728,7 +736,7 @@ class Sample(nn.Module):
             oemb = self.toqueries(oemb)
 
             dots = (semb * pemb * oemb).sum(dim=2)  # + sb + pb + ob + gb
-            dots = ACTIVATION(dots)
+            # dots = ACTIVATION(dots)
 
             u = torch.rand(*dots.size(), device=d(dots))
             weights = u.log() / dots

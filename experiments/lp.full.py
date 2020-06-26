@@ -1,7 +1,7 @@
 from _context import kgmodels
 
 from kgmodels import util
-from util import d, tic, toc
+from util import d, tic, toc, get_slug
 
 import torch
 
@@ -9,7 +9,7 @@ from torch import nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 
-import random, sys, tqdm, math, random
+import random, sys, tqdm, math, random, os
 from tqdm import trange
 
 import rgat
@@ -21,6 +21,8 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 
 import multiprocessing as mp
+
+from torch.utils.tensorboard import SummaryWriter
 
 """
 Full batch RGCN training for link prediction
@@ -81,6 +83,9 @@ def go(arg):
     global repeats
     repeats = arg.repeats
 
+    tbdir = arg.tb_dir if arg.tb_dir is not None else os.path.join('./runs', get_slug(arg))[:250]
+    tbw = SummaryWriter(log_dir=tbdir)
+
     dev = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     train_mrrs = []
@@ -94,6 +99,10 @@ def go(arg):
     print(train.size(0), 'training triples')
     print(test.size(0), 'test triples')
     print(train.size(0) + test.size(0), 'total triples')
+
+    # print(train)
+    # print(test)
+    # sys.exit()
 
     # set of all triples (for filtering)
     alltriples = set()
@@ -115,7 +124,12 @@ def go(arg):
 
         print(f'nodes padded to {len(i2n)} to make it divisible by {arg.num_blocks} (added {added} null nodes).')
 
-    for r in tqdm.trange(repeats) if repeats > 1 else range(repeats):
+    if repeats > 1:
+        RP, EP = trange, range
+    else:
+        RP, EP = range, trange
+
+    for r in RP(repeats):
 
         """
         Define model
@@ -161,10 +175,10 @@ def go(arg):
 
             depth = 0
             set_lr(opt, arg.lr[0])
-            if e > arg.epochs[0]:
+            if e >= arg.epochs[0]:
                 depth = 1
                 set_lr(opt, arg.lr[1])
-            if e > sum(arg.epochs[:2]):
+            if e >= sum(arg.epochs[:2]):
                 depth = 2
                 set_lr(opt, arg.lr[2])
 
@@ -176,7 +190,7 @@ def go(arg):
                 print(f'precomp took {toc():.2}s')
 
             tsample, tforward, tbackward, ttotal, tloss, tstep = 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
-            for fr in trange(0, train.size(0), arg.batch):
+            for fr in EP(0, train.size(0), arg.batch):
 
                 tic()
                 model.train(True)
@@ -260,7 +274,7 @@ def go(arg):
                 seen += b; seeni += b
                 ttotal += toc()
 
-            print(f'epoch {e} (d{depth}); training loss {sumloss/seeni:.4}       s {tsample:.3}s, f {tforward:.3}s (loss {tloss:.3}s), b {tbackward:.3}, st {tstep:.3}, t {ttotal:.3}s')
+            prt(f'epoch {e} (d{depth}); training loss {sumloss/seeni:.4}       s {tsample:.3}s, f {tforward:.3}s (loss {tloss:.3}s), b {tbackward:.3}, st {tstep:.3}, t {ttotal:.3}s')
 
             # Evaluate
             if (e % arg.eval_int == 0 and e != 0) or e == sum(arg.epochs) - 1:
@@ -280,7 +294,7 @@ def go(arg):
                     tseen = 0
                     for tail in [True, False]: # head or tail prediction
 
-                        for s, p, o in tqdm.tqdm(testsub):
+                        for s, p, o in (testsub if repeats > 1 else tqdm.tqdm(testsub)):
 
                             s, p, o = s.item(), p.item(), o.item()
 
@@ -318,10 +332,10 @@ def go(arg):
                     hitsat3 = hitsat3 / tseen
                     hitsat10 = hitsat10 / tseen
 
-                    print(f'epoch {e}: MRR {mrr:.4}\t hits@1 {hitsat1:.4}\t  hits@3 {hitsat3:.4}\t  hits@10 {hitsat10:.4}')
-                    print(f'   ranks : {ranks[:10]}')
+                    prt(f'epoch {e}: MRR {mrr:.4}\t hits@1 {hitsat1:.4}\t  hits@3 {hitsat3:.4}\t  hits@10 {hitsat10:.4}')
+                    prt(f'   ranks : {ranks[:10]}')
 
-                    test_mrrs.append(mrr)
+        test_mrrs.append(mrr)
 
     print('training finished.')
 
@@ -513,6 +527,11 @@ if __name__ == "__main__":
     parser.add_argument("--multi", dest="multi",
                         help="Use multiprocessing for the sampling.",
                         action="store_true")
+
+    parser.add_argument("-T", "--tb_dir", dest="tb_dir",
+                        help="Data directory",
+                        default=None)
+
 
     options = parser.parse_args()
 
