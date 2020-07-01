@@ -78,7 +78,7 @@ def go(arg):
 
     test_mrrs = []
 
-    train, test, (n2i, i2n), (r2i, i2r) = \
+    train, val, test, (n2i, i2n), (r2i, i2r) = \
         kgmodels.load_lp(arg.name, final=arg.final)
 
     print(len(i2n), 'nodes')
@@ -89,10 +89,17 @@ def go(arg):
 
     # set of all triples (for filtering)
     alltriples = set()
-    for s, p, o in torch.cat([train, test], dim=0):
+    for s, p, o in torch.cat([train, val, test], dim=0):
         s, p, o = s.item(), p.item(), o.item()
 
         alltriples.add((s, p, o))
+
+
+    if arg.final:
+        train, test = torch.cat([train, val], dim=0), test
+    else:
+        train, test = train, val
+
 
     for r in tqdm.trange(repeats) if repeats > 1 else range(repeats):
 

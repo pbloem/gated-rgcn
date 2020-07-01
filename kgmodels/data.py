@@ -243,12 +243,11 @@ def load_lp_random(N=50, ptest=0.2):
 
     return train, test, (n2i, i2n), (r2i, i2r)
 
-def load_lp(name, final=False, limit=None, bidir=False, prune=False):
+def load_lp(name, limit=None, bidir=False, prune=False):
     """
     Loads a knowledge graph dataset. Self connections are NOT automatically added
 
     :param name: Dataset name ('fb' or 'wn' at the moment)
-    :param final: If true, load the set set and train+val to train on. Otherwise load train and val
     :param limit: If set, the number of unique relations will be limited to this value, plus one for the self-connections,
                   plus one for the remaining connections combined into a single, new relation.
     :return: two lists of triples (train, test), two pairs of dicts for nodes and relations
@@ -279,13 +278,9 @@ def load_lp(name, final=False, limit=None, bidir=False, prune=False):
     val   = load_strings(val_file)
     test  = load_strings(test_file)
 
-    if not final:
-        test = val
-    else:
-        train = train + val
-
     if limit:
         train = train[:limit]
+        val = val[:limit]
         test = test[:limit]
 
     # mappings for nodes (n) and relations (r)
@@ -298,16 +293,17 @@ def load_lp(name, final=False, limit=None, bidir=False, prune=False):
     i2n, i2r = list(nodes), list(rels)
     n2i, r2i = {n:i for i, n in enumerate(nodes)}, {r:i for i, r in enumerate(rels)}
 
-    traini, testi = [], []
+    traini, vali, testi = [], [], []
     for st in train:
         traini.append([n2i[st[0]], r2i[st[1]], n2i[st[2]]])
+    for st in train:
+        vali.append([n2i[st[0]], r2i[st[1]], n2i[st[2]]])
     for st in test:
         testi.append([n2i[st[0]], r2i[st[1]], n2i[st[2]]])
 
-    train = torch.tensor(traini)
-    test = torch.tensor(testi)
+    train, val, test = torch.tensor(traini), torch.tensor(vali), torch.tensor(testi)
 
-    return train, test, (n2i, i2n), (r2i, i2r)
+    return train, val, test, (n2i, i2n), (r2i, i2r)
 
 def assign(patternnode, num_nodes, entity, cls, mem, ind, sz, unique_constants=True):
     """

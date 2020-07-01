@@ -88,7 +88,6 @@ def go(arg):
 
         num_cls = len(cls)
 
-
     print('some test set ids and labels', test_idx[:10], test_lbl[:10])
 
     tnodes = len(i2n)
