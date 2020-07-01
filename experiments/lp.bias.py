@@ -118,8 +118,9 @@ def go(arg):
         else:
             raise Exception()
 
-        sched = torch.optim.lr_scheduler.ReduceLROnPlateau(patience=arg.patience, optimizer=opt) \
+        sched = torch.optim.lr_scheduler.ReduceLROnPlateau(patience=arg.patience, optimizer=opt, mode='max', factor=0.95, threshold=0.0001) \
             if arg.sched else None
+        #-- defaults taken from libkge
 
         # nr of negatives sampled
         ng = arg.negative_rate

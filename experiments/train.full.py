@@ -178,13 +178,14 @@ def go(arg):
                 if e == arg.epochs - 1:
                     test_accs.append(float(accuracy))
 
-                # plot edgeweights
+                if arg.model == 'weighted':
+                    # plot edgeweights
 
-                weights = model.edgeweights().cpu().numpy()
-                plt.hist(weights, bins=100)
-                plt.yscale('log')
-                plt.savefig(f'edgeweights.{e:03}.png')
-                plt.clf()
+                    weights = model.edgeweights().cpu().numpy()
+                    plt.hist(weights, bins=100)
+                    plt.yscale('log')
+                    plt.savefig(f'edgeweights.{e:03}.png')
+                    plt.clf()
 
             if torch.cuda.is_available():
                 del loss # clear memory
