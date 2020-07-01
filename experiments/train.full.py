@@ -178,7 +178,7 @@ def go(arg):
                 if e == arg.epochs - 1:
                     test_accs.append(float(accuracy))
 
-                if arg.model == 'weighted':
+                if arg.mixer == 'weighted':
                     # plot edgeweights
 
                     weights = model.edgeweights().cpu().numpy()
