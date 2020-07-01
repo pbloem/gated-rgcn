@@ -79,7 +79,7 @@ def go(arg):
     test_mrrs = []
 
     train, val, test, (n2i, i2n), (r2i, i2r) = \
-        kgmodels.load_lp(arg.name, final=arg.final)
+        kgmodels.load_lp(arg.name)
 
     print(len(i2n), 'nodes')
     print(len(i2r), 'relations')
