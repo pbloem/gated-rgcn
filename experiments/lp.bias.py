@@ -81,12 +81,6 @@ def go(arg):
     train, val, test, (n2i, i2n), (r2i, i2r) = \
         kgmodels.load_lp(arg.name)
 
-    print(len(i2n), 'nodes')
-    print(len(i2r), 'relations')
-    print(train.size(0), 'training triples')
-    print(test.size(0), 'test triples')
-    print(train.size(0) + test.size(0), 'total triples')
-
     # set of all triples (for filtering)
     alltriples = set()
     for s, p, o in torch.cat([train, val, test], dim=0):
@@ -100,6 +94,13 @@ def go(arg):
     else:
         train, test = train, val
 
+    print(len(i2n), 'nodes')
+    print(len(i2r), 'relations')
+    print(train.size(0), 'training triples')
+    print(test.size(0), 'test triples')
+    print(train.size(0) + test.size(0), 'total triples')
+
+    sys.exit()
 
     for r in tqdm.trange(repeats) if repeats > 1 else range(repeats):
 

@@ -294,12 +294,15 @@ def load_lp(name, limit=None, bidir=False, prune=False):
     n2i, r2i = {n:i for i, n in enumerate(nodes)}, {r:i for i, r in enumerate(rels)}
 
     traini, vali, testi = [], [], []
-    for st in train:
-        traini.append([n2i[st[0]], r2i[st[1]], n2i[st[2]]])
-    for st in train:
-        vali.append([n2i[st[0]], r2i[st[1]], n2i[st[2]]])
-    for st in test:
-        testi.append([n2i[st[0]], r2i[st[1]], n2i[st[2]]])
+
+    for s, p, o in train:
+        traini.append([n2i[s], r2i[p], n2i[o]])
+
+    for s, p, o in val:
+        vali.append([n2i[s], r2i[p], n2i[o]])
+
+    for s, p, o in test:
+        testi.append([n2i[s], r2i[p], n2i[o]])
 
     train, val, test = torch.tensor(traini), torch.tensor(vali), torch.tensor(testi)
 
