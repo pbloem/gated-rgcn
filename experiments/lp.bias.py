@@ -243,7 +243,7 @@ def go(arg):
                                 candidates = filter(raw_candidates, alltriples, (st, p, o))
 
                             candidates = torch.tensor(candidates)
-                            scores = util.batch(model, candidates, batch_size=arg.batch * 2)
+                            scores = util.batch(model, candidates, batch_size=arg.test_batch)
 
                             sorted_candidates = [tuple(p[0]) for p in sorted(zip(candidates.tolist(), scores.tolist()), key=lambda p : -p[1])]
 
@@ -307,6 +307,12 @@ if __name__ == "__main__":
                         dest="batch",
                         help="Nr of positive triples to consider per batch (negatives are added to this).",
                         default=32, type=int)
+
+
+    parser.add_argument("--test-batch-size",
+                        dest="test_batch",
+                        help="Batch size for evaluation. This should be about the same size as the training batch size times the negative sampling rate.",
+                        default=1000, type=int)
 
     parser.add_argument("-E", "--embedding-size",
                         dest="emb",
