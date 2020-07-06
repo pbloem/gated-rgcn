@@ -100,8 +100,6 @@ def go(arg):
     print(test.size(0), 'test triples')
     print(train.size(0) + test.size(0), 'total triples')
 
-    sys.exit()
-
     for r in tqdm.trange(repeats) if repeats > 1 else range(repeats):
 
         """
