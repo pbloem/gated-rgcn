@@ -193,6 +193,8 @@ def go(arg):
                 elif arg.loss == 'ce':
                     loss = F.cross_entropy(out, labels)
 
+                sys.exit()
+
                 if arg.reg_eweight is not None:
                     loss += model.penalty(which='entities', p=arg.reg_exp, rweight=arg.reg_eweight)
 
@@ -209,7 +211,8 @@ def go(arg):
                 tbw.add_scalar('biases/train_loss', float(loss.item()), seen)
 
             # Evaluate
-            if (e % arg.eval_int == 0 and e != 0) or e == arg.epochs - 1:
+            if (e % arg.eval_int == 0) or e == arg.epochs - 1:
+
                 with torch.no_grad():
 
                     model.train(False)
@@ -224,38 +227,73 @@ def go(arg):
                         testsub = test[random.sample(range(test.size(0)), k=arg.eval_size)]
 
                     tseen = 0
+
+                    # We collect the candidates of multiple triples together in these buffers, to feed them through as a
+                    # single batch
+                    tbuffer = [] # candidates in the buffer
+                    ibuffer = [] # the index of the triple they belong to
+                    ii = []      # the indices present in the current buffer
+                    target = {}  # the true subject or object for instance i
+
                     for tail in [True, False]: # head or tail prediction
 
-                        for s, p, o in tqdm.tqdm(testsub):
+                        for i, (s, p, o) in enumerate(tqdm.tqdm(testsub)):
 
-                            s, p, o = s.item(), p.item(), o.item()
+                            s, p, o = triple = s.item(), p.item(), o.item()
 
                             if tail:
-                                ot = o; del o
-
                                 raw_candidates = [(s, p, o) for o in range(len(i2n))]
-                                candidates = filter(raw_candidates, alltriples, (s, p, ot))
+                                candidates = filter(raw_candidates, alltriples, triple)
 
                             else:
-                                st = s; del s
-
                                 raw_candidates = [(s, p, o) for s in range(len(i2n))]
-                                candidates = filter(raw_candidates, alltriples, (st, p, o))
+                                candidates = filter(raw_candidates, alltriples, triple)
 
-                            candidates = torch.tensor(candidates)
-                            scores = util.batch(model, candidates, batch_size=arg.test_batch)
+                            tbuffer.extend(candidates)
+                            ibuffer.extend([i] * len(candidates))
+                            ii.append(i)
+                            target[i] = triple
 
-                            sorted_candidates = [tuple(p[0]) for p in sorted(zip(candidates.tolist(), scores.tolist()), key=lambda p : -p[1])]
+                            if i % arg.test_batch == 0 or i == len(testsub - 1):
 
-                            rank = (sorted_candidates.index((s, p, ot)) + 1) if tail else (sorted_candidates.index((st, p, o)) + 1)
-                            ranks.append(rank)
+                                scores = model(torch.tensor(tbuffer))
 
-                            hitsat1 += (rank == 1)
-                            hitsat3 += (rank <= 3)
-                            hitsat10 += (rank <= 10)
-                            mrr += 1.0 / rank
+                                scores = scores.tolist()
 
-                            tseen += 1
+                                dict = {ind : ([], []) for ind in ii }
+
+                                # separate candidates and scores by original triple (j)
+                                for c, s, j in zip(tbuffer, scores, ibuffer):
+                                    dict[j][0].append(c)
+                                    dict[j][1].append(s)
+
+                                for j, (jcandidates, jscores) in dict.items():
+
+                                    # sort candidates by score
+                                    sorted_candidates = [tuple(p[0]) for p in
+                                                            sorted(
+                                                                zip(jcandidates, jscores),
+                                                                key=lambda p: -p[1]
+                                                            )
+                                                        ]
+
+                                    triple = target[j]
+
+                                    rank = sorted_candidates.index(triple) + 1
+
+                                    ranks.append(rank)
+
+                                    hitsat1 += (rank == 1)
+                                    hitsat3 += (rank <= 3)
+                                    hitsat10 += (rank <= 10)
+                                    mrr += 1.0 / rank
+
+                                    tseen += 1
+
+                                tbuffer.clear()
+                                ibuffer.clear()
+                                ii.clear()
+                                target.clear()
 
                     mrr = mrr / tseen
                     hitsat1 = hitsat1 / tseen
@@ -309,10 +347,10 @@ if __name__ == "__main__":
                         default=32, type=int)
 
 
-    parser.add_argument("--test-batch-size",
+    parser.add_argument("--test-batch",
                         dest="test_batch",
-                        help="Batch size for evaluation. This should be about the same size as the training batch size times the negative sampling rate.",
-                        default=1000, type=int)
+                        help="Number of triples per batch (including all candidates).",
+                        default=10, type=int)
 
     parser.add_argument("-E", "--embedding-size",
                         dest="emb",

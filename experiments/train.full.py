@@ -144,8 +144,7 @@ def go(arg):
             loss = F.cross_entropy(cls, train_lbl)
 
             if arg.l2weight is not None:
-                l2 = sum([p.pow(2).sum() for p in model.parameters()])
-                loss = loss + arg.l2weight * l2
+                loss = loss + arg.l2weight * model.penalty(p=2)
 
             if arg.l1 > 0.0:
                 loss = loss + arg.l1 * model.edgeweights().norm(p=1)

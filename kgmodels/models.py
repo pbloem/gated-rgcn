@@ -137,6 +137,16 @@ class RGCNClassic(nn.Module):
 
         return h + self.bias2 #-- softmax is applied in the loss
 
+    def penalty(self, p=2):
+
+        assert p==2
+
+        if self.bases is None:
+            return self.weights1.pow(2).sum()
+
+        return self.comps1.pow(p).sum() + self.bases1.pow(p).sum()
+
+
 class RGCNEmb(nn.Module):
     """
     RGCN with single node embeddings and two GCN layers.
