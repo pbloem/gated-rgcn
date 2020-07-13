@@ -184,7 +184,9 @@ def go(arg):
 
                 opt.zero_grad()
 
+                print('a')
                 out = model(triples)
+                print('b')
 
                 assert out.size() == (b, ng + 1)
 
@@ -193,13 +195,11 @@ def go(arg):
                 elif arg.loss == 'ce':
                     loss = F.cross_entropy(out, labels)
 
-                sys.exit()
-
                 if arg.reg_eweight is not None:
-                    loss += model.penalty(which='entities', p=arg.reg_exp, rweight=arg.reg_eweight)
+                    loss = loss + model.penalty(which='entities', p=arg.reg_exp, rweight=arg.reg_eweight)
 
                 if arg.reg_rweight is not None:
-                    loss += model.penalty(which='relations', p=arg.reg_exp, rweight=arg.reg_rweight)
+                    loss = loss + model.penalty(which='relations', p=arg.reg_exp, rweight=arg.reg_rweight)
 
                 loss.backward()
 
