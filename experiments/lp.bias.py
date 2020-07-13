@@ -184,9 +184,7 @@ def go(arg):
 
                 opt.zero_grad()
 
-                print('a')
                 out = model(triples)
-                print('b')
 
                 assert out.size() == (b, ng + 1)
 
@@ -256,7 +254,7 @@ def go(arg):
 
                             if i % arg.test_batch == 0 or i == len(testsub - 1):
 
-                                scores = model(torch.tensor(tbuffer))
+                                scores = model(torch.tensor(tbuffer, device=d()))
 
                                 scores = scores.tolist()
 
