@@ -209,7 +209,7 @@ def go(arg):
                 tbw.add_scalar('biases/train_loss', float(loss.item()), seen)
 
             # Evaluate
-            if (e % arg.eval_int == 0) or e == arg.epochs - 1:
+            if ((e+1) % arg.eval_int == 0) or e == arg.epochs - 1:
 
                 with torch.no_grad():
 
