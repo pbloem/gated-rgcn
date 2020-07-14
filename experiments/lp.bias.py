@@ -34,7 +34,9 @@ global repeats
 
 def corrupt(batch, n):
     """
-    Corrupts the negatives of a batch of triples (in place). The first copy of the triples is left uncorrupted
+    Corrupts the negatives of a batch of triples (in place).
+
+    Randomly corrupts either heads or tails
 
     :param batch_size:
     :param n: nr of nodes in the graph
@@ -52,6 +54,27 @@ def corrupt(batch, n):
     mask = torch.cat([mask, zeros, ~mask], dim=2)
 
     batch[mask] = corruptions
+
+def corrupt_one(batch, n, target):
+    """
+    Corrupts the negatives of a batch of triples (in place).
+
+    Corrupts either only head or only tails
+
+    :param batch_size:
+    :param n: nr of nodes in the graph
+    :param target: 0 for head, 1 for predicate, 2 for tail
+
+
+    :return:
+    """
+    bs, ns, _ = batch.size()
+
+    # new entities to insert
+    corruptions = torch.randint(size=(bs * ns,),low=0, high=n, dtype=torch.long, device=d(batch))
+
+    batch[:, :, target] = corruptions
+
 
 def filter(rawtriples, all, true):
     filtered = []
@@ -87,7 +110,6 @@ def go(arg):
         s, p, o = s.item(), p.item(), o.item()
 
         alltriples.add((s, p, o))
-
 
     if arg.final:
         train, test = torch.cat([train, val], dim=0), test
@@ -129,7 +151,6 @@ def go(arg):
         #-- defaults taken from libkge
 
         # nr of negatives sampled
-        ng = arg.negative_rate
         weight = torch.tensor([arg.nweight, 1.0], device=d()) if arg.nweight else None
 
         seen = 0
@@ -155,38 +176,44 @@ def go(arg):
 
                     b, _ = positives.size()
 
-                    # sample negatives
-                    if arg.corrupt_global: # global corruption (sample random true triples to corrupt)
-                        indices = torch.randint(size=(b*ng,), low=0, high=train.size(0))
-                        negatives = train[indices, :].view(b, ng, 3) # -- triples to be corrupted
+                    # # sample negatives
+                    # if arg.corrupt_global: # global corruption (sample random true triples to corrupt)
+                    #     indices = torch.randint(size=(b*ng,), low=0, high=train.size(0))
+                    #     negatives = train[indices, :].view(b, ng, 3) # -- triples to be corrupted
+                    #
+                    # else: # local corruption (directly corrupt the current batch)
+                    #     negatives = positives.clone()[:, None, :].expand(b, ng, 3).contiguous()
 
-                    else: # local corruption (directly corrupt the current batch)
-                        negatives = positives.clone()[:, None, :].expand(b, ng, 3).contiguous()
 
-                    corrupt(negatives, len(i2n))
+                    ttriples = []
+                    for target, ng in zip([0, 1, 2], arg.negative_rate):
+                        if ng > 0:
 
-                    triples = torch.cat([positives[:, None, :], negatives], dim=1)
+                            negatives = positives.clone()[:, None, :].expand(b, ng, 3).contiguous()
+                            corrupt(negatives, len(i2n))
 
-                    if torch.cuda.is_available():
-                        triples = triples.cuda()
+                            ttriples.append(torch.cat([positives[:, None, :], negatives], dim=1))
+
+                    triples = torch.cat(ttriples, dim=0)
+
+                    b, _, _ = triples.size()
 
                     if arg.loss == 'bce':
                         labels = torch.cat([torch.ones(b, 1), torch.zeros(b, ng)], dim=1)
                     elif arg.loss == 'ce':
                         labels = torch.zeros(b, dtype=torch.long)
                         # -- CE loss treats the problem as a multiclass classification problem: for a positive triple,
-                        #    together with its k corruptions, identify which is the true triple. This is always triple 0,
-                        #    but the score function is order equivariant, so i can't see the index of the triple it's
-                        #    classifying.
+                        #    together with its k corruptions, identify which is the true triple. This is always triple 0.
+                        #    (It may seem like the model could easily cheat by always choosing triple 0, but the score
+                        #    function is order equivariant, so it can't choose by ordering.)
 
                     if torch.cuda.is_available():
+                        triples = triples.cuda()
                         labels = labels.cuda()
 
                 opt.zero_grad()
 
                 out = model(triples)
-
-                assert out.size() == (b, ng + 1)
 
                 if arg.loss == 'bce':
                     loss = F.binary_cross_entropy_with_logits(out, labels, weight=weight)
@@ -362,8 +389,9 @@ if __name__ == "__main__":
 
     parser.add_argument("-N", "--negative-rate",
                         dest="negative_rate",
-                        help="Number of negatives for every positive",
-                        default=1, type=int)
+                        help="Number of negatives for every positive (for s, p and o respectively)",
+                        nargs=3,
+                        default=[10, 0, 10], type=int)
 
     parser.add_argument("--reg-exp",
                         dest="reg_exp",
