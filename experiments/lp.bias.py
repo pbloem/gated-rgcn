@@ -120,7 +120,7 @@ def go(arg):
     subjects   = list({s for s, _, _ in train})
     predicates = list({p for _, p, _ in train})
     objects    = list({o for _, _, o in train})
-    candidates = (subjects, predicates, objects)
+    ccandidates = (subjects, predicates, objects)
 
     print(len(i2n), 'nodes')
     print(len(i2r), 'relations')
@@ -196,7 +196,7 @@ def go(arg):
                         if ng > 0:
 
                             negatives = positives.clone()[:, None, :].expand(b, ng, 3).contiguous()
-                            corrupt_one(negatives, candidates[target], target)
+                            corrupt_one(negatives, ccandidates[target], target)
 
                             ttriples.append(torch.cat([positives[:, None, :], negatives], dim=1))
 
