@@ -55,7 +55,7 @@ def corrupt(batch, n):
 
     batch[mask] = corruptions
 
-def corrupt_one(batch, n, target):
+def corrupt_one(batch, candidates, target):
     """
     Corrupts the negatives of a batch of triples (in place).
 
@@ -71,7 +71,8 @@ def corrupt_one(batch, n, target):
     bs, ns, _ = batch.size()
 
     # new entities to insert
-    corruptions = torch.randint(size=(bs * ns,),low=0, high=n, dtype=torch.long, device=d(batch))
+    #corruptions = torch.randint(size=(bs * ns,),low=0, high=n, dtype=torch.long, device=d(batch))
+    corruptions = torch.tensor(random.choices(candidates, k=bs*ns),  dtype=torch.long, device=d(batch)).view(bs, ns)
 
     batch[:, :, target] = corruptions
 
@@ -115,6 +116,11 @@ def go(arg):
         train, test = torch.cat([train, val], dim=0), test
     else:
         train, test = train, val
+
+    subjects   = list({s for s, _, _ in train})
+    predicates = list({p for _, p, _ in train})
+    objects    = list({o for _, _, o in train})
+    candidates = (subjects, predicates, objects)
 
     print(len(i2n), 'nodes')
     print(len(i2r), 'relations')
@@ -190,7 +196,7 @@ def go(arg):
                         if ng > 0:
 
                             negatives = positives.clone()[:, None, :].expand(b, ng, 3).contiguous()
-                            corrupt(negatives, len(i2n))
+                            corrupt_one(negatives, candidates[target], target)
 
                             ttriples.append(torch.cat([positives[:, None, :], negatives], dim=1))
 
