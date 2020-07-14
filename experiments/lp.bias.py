@@ -266,9 +266,12 @@ def go(arg):
                     ii = []      # the indices present in the current buffer
                     target = {}  # the true subject or object for instance i
 
+                    itest = 0
+
                     for tail in [True, False]: # head or tail prediction
 
                         for i, (s, p, o) in enumerate(tqdm.tqdm(testsub)):
+                            itest += 1
 
                             s, p, o = triple = s.item(), p.item(), o.item()
 
@@ -285,7 +288,7 @@ def go(arg):
                             ii.append(i)
                             target[i] = triple
 
-                            if i % arg.test_batch == 0 or i == len(testsub - 1):
+                            if i % arg.test_batch == 0 or i == len(testsub) - 1:
 
                                 scores = model(torch.tensor(tbuffer, device=d()))
 
@@ -333,6 +336,8 @@ def go(arg):
 
                     print(f'epoch {e}: MRR {mrr:.4}\t hits@1 {hitsat1:.4}\t  hits@3 {hitsat3:.4}\t  hits@10 {hitsat10:.4}')
                     print(f'   ranks : {ranks[:10]}')
+                    print('mrr check', sum([1.0/r for r in ranks])/len(ranks))
+                    print('len check', tseen, len(ranks), len(testsub))
 
                     tbw.add_scalar('biases/mrr', mrr, e)
                     tbw.add_scalar('biases/h@1', hitsat1, e)
