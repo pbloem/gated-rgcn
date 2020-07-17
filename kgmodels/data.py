@@ -87,6 +87,19 @@ def load(name, final=False, limit=None, bidir=False, prune=False):
         label_header = 'label_cateogory'
         nodes_header = 'proxy'
 
+    elif name ==  'mutag':
+        data_url = 'https://www.dropbox.com/s/qy8j3p8eacvm4ir/mutag_stripped.nt.gz?dl=1'
+        file = util.here('data/mutag/mutag_stripped.nt.gz')
+        if not os.path.isfile(file):
+            print('Downloading MUTAG data.')
+            wget.download(data_url, file)
+
+        # task_file = util.here('data/mutag/completeDataset.tsv')
+        train_file = util.here('data/mutag/trainingSet.tsv')
+        test_file = util.here('data/mutag/testSet.tsv')
+        label_header = 'label_mutagenic'
+        nodes_header = 'bond'
+
     elif name == 'bgs':
         file = util.here('data/bgs/bgs_stripped.nt.gz')
         train_file = util.here('data/bgs/trainingSet(lith).tsv')
