@@ -196,7 +196,7 @@ def go(arg):
                         if ng > 0:
 
                             negatives = positives.clone()[:, None, :].expand(b, ng, 3).contiguous()
-                            corrupt_one(negatives, ccandidates[target], target)
+                            corrupt_one(negatives, ccandidates[target] if arg.limit_negatives else range(len(i2n)), target)
 
                             ttriples.append(torch.cat([positives[:, None, :], negatives], dim=1))
 
@@ -276,12 +276,11 @@ def go(arg):
                             s, p, o = triple = s.item(), p.item(), o.item()
 
                             if tail:
-                                raw_candidates = [(s, p, o) for o in range(len(i2n))]
-                                candidates = filter(raw_candidates, alltriples, triple)
-
+                                raw_candidates = [(s, p, c) for c in range(len(i2n))]
                             else:
-                                raw_candidates = [(s, p, o) for s in range(len(i2n))]
-                                candidates = filter(raw_candidates, alltriples, triple)
+                                raw_candidates = [(c, p, o) for c in range(len(i2n))]
+
+                            candidates = filter(raw_candidates, alltriples, triple)
 
                             tbuffer.extend(candidates)
                             ibuffer.extend([i] * len(candidates))
@@ -478,6 +477,10 @@ if __name__ == "__main__":
 
     parser.add_argument("--sched", dest="sched",
                         help="Enable scheduler.",
+                        action="store_true")
+
+    parser.add_argument("--limit-negatives", dest="limit_negatives",
+                        help="Sample oly negative heads that have appeared in the head position (and likewise for tails).",
                         action="store_true")
 
     parser.add_argument("--reciprocal", dest="reciprocal",
