@@ -248,15 +248,14 @@ def go(arg):
 
                     model.train(False)
 
-                    ranks = []
-
-                    mrr = hitsat1 = hitsat3 = hitsat10 = 0.0
-
                     if arg.eval_size is None:
                         testsub = test
                     else:
                         testsub = test[random.sample(range(test.size(0)), k=arg.eval_size)]
 
+                    ranks = []
+                    mrr = hitsat1 = hitsat3 = hitsat10 = 0.0
+                    tforward = tsort = ttotal =0.0
                     tseen = 0
 
                     # We collect the candidates of multiple triples together in these buffers, to feed them through as a
@@ -268,9 +267,11 @@ def go(arg):
 
                     itest = 0
 
+                    tic()
                     for tail in [True, False]: # head or tail prediction
 
                         for i, (s, p, o) in enumerate(tqdm.tqdm(testsub)):
+
                             itest += 1
 
                             s, p, o = triple = s.item(), p.item(), o.item()
@@ -288,9 +289,13 @@ def go(arg):
                             target[i] = triple
 
                             if i % arg.test_batch == 0 or i == len(testsub) - 1:
+                                # process the current batch
 
+                                tic()
                                 scores = model(torch.tensor(tbuffer, device=d()))
+                                tforward += toc()
 
+                                tic()
                                 scores = scores.tolist()
 
                                 dict = {ind : ([], []) for ind in ii }
@@ -323,10 +328,14 @@ def go(arg):
 
                                     tseen += 1
 
+                                tsort += toc()
+
                                 tbuffer.clear()
                                 ibuffer.clear()
                                 ii.clear()
                                 target.clear()
+
+                        assert len(tbuffer) == 0
 
                     mrr = mrr / tseen
                     hitsat1 = hitsat1 / tseen
@@ -337,6 +346,7 @@ def go(arg):
                     print(f'   ranks : {ranks[:10]}')
                     print('mrr check', sum([1.0/r for r in ranks])/len(ranks))
                     print('len check', tseen, len(ranks), len(testsub))
+                    print(f'time {toc():.2}s total, {tforward:.2}s forward, {tsort:.2}s processing')
 
                     tbw.add_scalar('biases/mrr', mrr, e)
                     tbw.add_scalar('biases/h@1', hitsat1, e)
