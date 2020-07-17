@@ -91,8 +91,8 @@ def go(arg):
     train_mrrs = []
     test_mrrs = []
 
-    train, test, (n2i, i2n), (r2i, i2r) = \
-        kgmodels.load_lp(arg.name, final=arg.final)
+    train, val, test, (n2i, i2n), (r2i, i2r) = \
+        kgmodels.load_lp(arg.name)
 
     print(len(i2n), 'nodes')
     print(len(i2r), 'relations')
@@ -110,6 +110,11 @@ def go(arg):
         s, p, o = s.item(), p.item(), o.item()
 
         alltriples.add((s, p, o))
+
+    if arg.final:
+        train, test = torch.cat([train, val], dim=0), test
+    else:
+        train, test = train, val
 
     if arg.decomp == 'block':
         # -- pad the node list to make it divisible by the nr. of blocks

@@ -266,6 +266,17 @@ class RGCNEmb(nn.Module):
 
         return hidden2 + self.bias2 #-- softmax is applied in the loss
 
+    def penalty(self, p=2):
+
+        assert p==2
+
+        ep = self.embeddings.pow(2).sum()
+
+        if self.bases is None:
+            return ep + self.weights1.pow(2).sum()
+
+        return ep + self.comps1.pow(p).sum() + self.bases1.pow(p).sum()
+
 MULT = 100
 
 class RGCNWeighted(nn.Module):
