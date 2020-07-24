@@ -76,16 +76,6 @@ def corrupt_one(batch, candidates, target):
 
     batch[:, :, target] = corruptions
 
-
-def filter(rawtriples, all, true):
-    filtered = []
-
-    for triple in rawtriples:
-        if triple == true or not triple in all:
-            filtered.append(triple)
-
-    return filtered
-
 def prt(str, end='\n'):
     if repeats == 1:
         print(str, end=end)
@@ -253,105 +243,26 @@ def go(arg):
                     else:
                         testsub = test[random.sample(range(test.size(0)), k=arg.eval_size)]
 
-                    ranks = []
-                    mrr = hitsat1 = hitsat3 = hitsat10 = 0.0
-                    tforward = tsort = ttotal =0.0
-                    tseen = 0
+                    mrr, hits, ranks = util.eval(
+                        model=model, valset=testsub, alltriples=alltriples, n=len(i2n),
+                        batch_size=arg.test_batch, verbose=True)
 
-                    # We collect the candidates of multiple triples together in these buffers, to feed them through as a
-                    # single batch
-                    tbuffer = [] # candidates in the buffer
-                    ibuffer = [] # the index of the triple they belong to
-                    ii = []      # the indices present in the current buffer
-                    target = {}  # the true subject or object for instance i
+                    if arg.check_simple:
+                        mrrs, hitss, rankss = util.eval_simple(
+                            model=model, valset=testsub, alltriples=alltriples, n=len(i2n), verbose=True)
 
-                    itest = 0
+                        assert ranks == rankss
+                        assert mrr == mrrs
 
-                    tic()
-                    for tail in [True, False]: # head or tail prediction
-
-                        for i, (s, p, o) in enumerate(tqdm.tqdm(testsub)):
-
-                            itest += 1
-
-                            s, p, o = triple = s.item(), p.item(), o.item()
-
-                            if tail:
-                                raw_candidates = [(s, p, c) for c in range(len(i2n))]
-                            else:
-                                raw_candidates = [(c, p, o) for c in range(len(i2n))]
-
-                            candidates = filter(raw_candidates, alltriples, triple)
-
-                            tbuffer.extend(candidates)
-                            ibuffer.extend([i] * len(candidates))
-                            ii.append(i)
-                            target[i] = triple
-
-                            if i % arg.test_batch == 0 or i == len(testsub) - 1:
-                                # process the current batch
-
-                                tic()
-                                scores = model(torch.tensor(tbuffer, device=d()))
-                                tforward += toc()
-
-                                tic()
-                                scores = scores.tolist()
-
-                                dict = {ind : ([], []) for ind in ii }
-
-                                # separate candidates and scores by original triple (j)
-                                for c, s, j in zip(tbuffer, scores, ibuffer):
-                                    dict[j][0].append(c)
-                                    dict[j][1].append(s)
-
-                                for j, (jcandidates, jscores) in dict.items():
-
-                                    # sort candidates by score
-                                    sorted_candidates = [tuple(p[0]) for p in
-                                                            sorted(
-                                                                zip(jcandidates, jscores),
-                                                                key=lambda p: -p[1]
-                                                            )
-                                                        ]
-
-                                    triple = target[j]
-
-                                    rank = sorted_candidates.index(triple) + 1
-
-                                    ranks.append(rank)
-
-                                    hitsat1 += (rank == 1)
-                                    hitsat3 += (rank <= 3)
-                                    hitsat10 += (rank <= 10)
-                                    mrr += 1.0 / rank
-
-                                    tseen += 1
-
-                                tsort += toc()
-
-                                tbuffer.clear()
-                                ibuffer.clear()
-                                ii.clear()
-                                target.clear()
-
-                        assert len(tbuffer) == 0
-
-                    mrr = mrr / tseen
-                    hitsat1 = hitsat1 / tseen
-                    hitsat3 = hitsat3 / tseen
-                    hitsat10 = hitsat10 / tseen
-
-                    print(f'epoch {e}: MRR {mrr:.4}\t hits@1 {hitsat1:.4}\t  hits@3 {hitsat3:.4}\t  hits@10 {hitsat10:.4}')
+                    print(f'epoch {e}: MRR {mrr:.4}\t hits@1 {hits[0]:.4}\t  hits@3 {hits[1]:.4}\t  hits@10 {hits[2]:.4}')
                     print(f'   ranks : {ranks[:10]}')
-                    print('mrr check', sum([1.0/r for r in ranks])/len(ranks))
-                    print('len check', tseen, len(ranks), len(testsub))
-                    print(f'time {toc():.2}s total, {tforward:.2}s forward, {tsort:.2}s processing')
+
+                    print('len check', len(ranks), len(testsub))
 
                     tbw.add_scalar('biases/mrr', mrr, e)
-                    tbw.add_scalar('biases/h@1', hitsat1, e)
-                    tbw.add_scalar('biases/h@3', hitsat3, e)
-                    tbw.add_scalar('biases/h@10', hitsat10, e)
+                    tbw.add_scalar('biases/h@1', hits[0], e)
+                    tbw.add_scalar('biases/h@3', hits[1], e)
+                    tbw.add_scalar('biases/h@10', hits[2], e)
 
                     if sched is not None:
                         sched.step(mrr) # reduce lr if mrr stalls
@@ -495,6 +406,10 @@ if __name__ == "__main__":
 
     parser.add_argument("--reciprocal", dest="reciprocal",
                         help="Learn reciprocal relations.",
+                        action="store_true")
+
+    parser.add_argument("--check-simple", dest="check_simple",
+                        help="Double check with the simple (and slow) computation of the MRR.",
                         action="store_true")
 
     parser.add_argument("--patience",

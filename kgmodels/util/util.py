@@ -1,4 +1,4 @@
-import torch, os, sys, time
+import torch, os, sys, time, tqdm
 
 from torch.autograd import Variable
 import torch.nn.functional as F
@@ -10,6 +10,169 @@ from torch import nn
 import re
 
 tics = []
+
+def prt(verbose, *args, **kwargs):
+    if verbose:
+        print(*args, **kwargs)
+
+def filter(rawtriples, all, true):
+    filtered = []
+
+    for triple in rawtriples:
+        if triple == true or not triple in all:
+            filtered.append(triple)
+
+    return filtered
+
+def eval_simple(model : nn.Module, valset, alltriples, n, hitsat=[1, 3, 10], filter_candidates=True, verbose=False):
+    """
+    A simple and slow implementation
+    :param model:
+    :param valset:
+    :param alltriples:
+    :param n:
+    :param batch_size:
+    :param hitsat:
+    :param filter_candidates:
+    :param verbose:
+    :return:
+    """
+
+    ranks = []
+
+    for tail in [True, False]:  # head or tail prediction
+
+        for i, (s, p, o) in enumerate(tqdm.tqdm(valset) if verbose else valset):
+
+            s, p, o = triple = s.item(), p.item(), o.item()
+
+            if tail:
+                raw_candidates = [(s, p, c) for c in range(n)]
+            else:
+                raw_candidates = [(c, p, o) for c in range(n)]
+
+            if filter_candidates:
+                candidates = filter(raw_candidates, alltriples, triple)
+
+            scores = model(torch.tensor(candidates, device=d()))
+            scores = scores.tolist()
+
+            # sort candidates by score
+            sorted_candidates = [tuple(p[0]) for p in
+                                 sorted(
+                                     zip(candidates, scores),
+                                     key=lambda p: -p[1]
+                                 )
+                                 ]
+
+            rank = sorted_candidates.index(triple) + 1
+
+            ranks.append(rank)
+
+    mrr = sum([1.0/rank for rank in ranks])/len(ranks)
+
+    hits = []
+    for k in hitsat:
+        hits.append(sum([1.0 if rank <= k else 0.0 for rank in ranks]) / len(ranks))
+
+    return mrr, tuple(hits), ranks
+
+def eval(model : nn.Module, valset, alltriples, n, batch_size=16, hitsat=[1, 3, 10], filter_candidates=True, verbose=False):
+    """
+    Evaluates a triple scoring model.
+
+    :param model:
+    :param val_set:
+    :param alltriples:
+    :param filter:
+    :return:
+    """
+
+    ranks = []
+    tforward = tsort = ttotal = 0.0
+    tseen = 0
+
+    # We collect the candidates of multiple triples together in these buffers, to feed them through as a
+    # single batch
+    tbuffer = []  # candidates in the buffer
+    ibuffer = []  # the index of the triple they belong to
+    ii = []       # the indices present in the current buffer
+    target = {}   # the true subject or object for instance i
+
+    itest = 0
+
+    tic()
+    for tail in [True, False]:  # head or tail prediction
+
+        for i, (s, p, o) in enumerate(tqdm.tqdm(valset) if verbose else valset):
+
+            itest += 1
+
+            s, p, o = triple = s.item(), p.item(), o.item()
+
+            if tail:
+                raw_candidates = [(s, p, c) for c in range(n)]
+            else:
+                raw_candidates = [(c, p, o) for c in range(n)]
+
+            if filter_candidates:
+                candidates = filter(raw_candidates, alltriples, triple)
+
+            tbuffer.extend(candidates)
+            ibuffer.extend([i] * len(candidates))
+            ii.append(i)
+            target[i] = triple
+
+            if i % batch_size == 0 or i == len(valset) - 1:
+                # process the current batch
+
+                tic()
+                scores = model(torch.tensor(tbuffer, device=d()))
+                tforward += toc()
+
+                tic()
+                scores = scores.tolist()
+
+                dict = {ind: ([], []) for ind in ii}
+
+                # separate candidates and scores by original triple (j)
+                for c, s, j in zip(tbuffer, scores, ibuffer):
+                    dict[j][0].append(c)
+                    dict[j][1].append(s)
+
+                for j, (jcandidates, jscores) in dict.items():
+                    # sort candidates by score
+                    sorted_candidates = [tuple(p[0]) for p in
+                                         sorted(
+                                             zip(jcandidates, jscores),
+                                             key=lambda p: -p[1]
+                                         )
+                                         ]
+
+                    triple = target[j]
+
+                    rank = sorted_candidates.index(triple) + 1
+
+                    ranks.append(rank)
+
+                tsort += toc()
+
+                tbuffer.clear()
+                ibuffer.clear()
+                ii.clear()
+                target.clear()
+
+        assert len(tbuffer) == 0
+
+    mrr = sum([1.0/rank for rank in ranks])/len(ranks)
+
+    hits = []
+    for k in hitsat:
+        hits.append(sum([1.0 if rank <= k else 0.0 for rank in ranks]) / len(ranks))
+
+    prt(f'time {toc():.2}s total, {tforward:.2}s forward, {tsort:.2}s processing')
+
+    return mrr, tuple(hits), ranks
 
 def tic():
     tics.append(time.time())
