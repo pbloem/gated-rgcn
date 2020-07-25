@@ -38,3 +38,5 @@ class TestUtil(unittest.TestCase):
         self.assertEqual(hits[0], 2/(N * 2)) # one correct ans for head corrupt, one for tail
         self.assertEqual(hits[1], 6/(N * 2))
         self.assertEqual(hits[2], 20/(N * 2))
+
+

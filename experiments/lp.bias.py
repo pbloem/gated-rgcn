@@ -222,6 +222,8 @@ def go(arg):
                 if arg.reg_rweight is not None:
                     loss = loss + model.penalty(which='relations', p=arg.reg_exp, rweight=arg.reg_rweight)
 
+                assert not torch.isnan(loss), 'Loss has become NaN'
+
                 loss.backward()
 
                 sumloss += float(loss.item())

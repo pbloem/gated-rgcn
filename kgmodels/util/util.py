@@ -170,7 +170,8 @@ def eval(model : nn.Module, valset, alltriples, n, batch_size=16, hitsat=[1, 3, 
     for k in hitsat:
         hits.append(sum([1.0 if rank <= k else 0.0 for rank in ranks]) / len(ranks))
 
-    prt(f'time {toc():.2}s total, {tforward:.2}s forward, {tsort:.2}s processing')
+    if verbose:
+        print(f'time {toc():.2}s total, {tforward:.2}s forward, {tsort:.2}s processing')
 
     return mrr, tuple(hits), ranks
 
