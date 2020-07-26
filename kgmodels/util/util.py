@@ -236,13 +236,16 @@ def eval_batch(model : nn.Module, valset, truedicts, n, batch_size=16, hitsat=[1
 
     heads, tails = truedicts
 
+    tforward = tfilter = tsort = 0.0
+
+    tic()
     ranks = []
     for head in [True, False]:  # head or tail prediction
 
         for fr in rng(0, len(valset), batch_size):
             to = min(fr + batch_size, len(valset))
 
-            batch = valset[fr:to, :]
+            batch = valset[fr:to, :].to(device=d())
             bn, _ = batch.size()
 
             # compute the full score matrix (filter later)
@@ -255,29 +258,33 @@ def eval_batch(model : nn.Module, valset, truedicts, n, batch_size=16, hitsat=[1
             toscore = torch.cat([ar, bexp] if head else [bexp, ar], dim=2)
             assert toscore.size() == (bn, n, 3)
 
+            tic()
             scores = model(toscore)
+            tforward += toc()
             assert scores.size() == (bn, n)
 
             # filter out the true triples that aren't the target
+            tic()
             filter_scores_(scores, batch, truedicts, head=head)
+            tfilter += toc()
 
+            tic()
             _, indices = torch.sort(scores,  dim=1, descending=True)
             _, indices = torch.sort(indices, dim=1)
+            tsort += toc()
             # -- Sorting the indices, and retrieving the indices of that sort gives us the rank of each target in the sorting
 
             branks = indices[torch.arange(bn, device=d()), targets]
             ranks.extend((branks + 1).tolist())
-
-    print(ranks)
 
     mrr = sum([1.0/rank for rank in ranks])/len(ranks)
 
     hits = []
     for k in hitsat:
         hits.append(sum([1.0 if rank <= k else 0.0 for rank in ranks]) / len(ranks))
-    #
-    # if verbose:
-    #     print(f'time {toc():.2}s total, {tforward:.2}s forward, {tsort:.2}s processing')
+
+    if verbose:
+        print(f'time {toc():.4}s total, {tforward:.4}s forward, {tfilter:.4}s filtering, {tsort:.4}s sorting.')
 
     return mrr, tuple(hits), ranks
 
