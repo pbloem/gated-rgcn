@@ -228,6 +228,8 @@ def go(arg):
 
                 sumloss += float(loss.item())
 
+                #print('emean: ', model.relations.grad.mean().item())
+
                 opt.step()
 
                 seen += b; seeni += b
@@ -334,12 +336,12 @@ if __name__ == "__main__":
     parser.add_argument("--reg-eweight",
                         dest="reg_eweight",
                         help="Regularizer weight entities",
-                        default=0, type=float)
+                        default=None, type=float)
 
     parser.add_argument("--reg-rweight",
                         dest="reg_rweight",
                         help="Regularizer weight relations",
-                        default=0, type=float)
+                        default=None, type=float)
 
     parser.add_argument("-D", "--dataset-name",
                         dest="name",
