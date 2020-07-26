@@ -212,9 +212,9 @@ def go(arg):
                 out = model(triples)
 
                 if arg.loss == 'bce':
-                    loss = F.binary_cross_entropy_with_logits(out, labels, weight=weight)
+                    loss = F.binary_cross_entropy_with_logits(out, labels, weight=weight, reduction='sum')
                 elif arg.loss == 'ce':
-                    loss = F.cross_entropy(out, labels)
+                    loss = F.cross_entropy(out, labels, reduction='sum')
 
                 if arg.reg_eweight is not None:
                     loss = loss + model.penalty(which='entities', p=arg.reg_exp, rweight=arg.reg_eweight)
