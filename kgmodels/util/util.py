@@ -232,12 +232,14 @@ def eval_batch(model : nn.Module, valset, truedicts, n, batch_size=16, hitsat=[1
     :return:
     """
 
+    rng = tqdm.trange if verbose else range
+
     heads, tails = truedicts
 
     ranks = []
     for head in [True, False]:  # head or tail prediction
 
-        for fr in range(0, len(valset), batch_size):
+        for fr in rng(0, len(valset), batch_size):
             to = min(fr + batch_size, len(valset))
 
             batch = valset[fr:to, :]
