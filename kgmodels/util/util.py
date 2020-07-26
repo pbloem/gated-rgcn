@@ -24,9 +24,52 @@ def filter(rawtriples, all, true):
 
     return filtered
 
+
+def filter_scores_(scores, batch, truedicts, head=True):
+    """
+    Filters a score matrix by setting the scores of known non-target true triples to -inf
+    :param scores:
+    :param batch:
+    :param truedicts:
+    :param head:
+    :return:
+    """
+
+    indices = [] # indices of triples whose scores should be set to -infty
+
+    heads, tails = truedicts
+
+    for i, (s, p, o) in enumerate(batch):
+        s, p, o = triple = (s.item(), p.item(), o.item())
+        if head:
+            indices.extend([(i, si) for si in heads[p, o] if si != s])
+        else:
+            indices.extend([(i, oi) for oi in tails[s, p] if oi != o])
+        #-- We add the indices of all know triples except the one corresponding to the target triples.
+
+    indices = torch.tensor(indices, device=d())
+
+    scores[indices[:, 0], indices[:, 1]] = float('-inf')
+
+def truedicts(all):
+    """
+    Generates a pair of dictionairies containg all true tail and head completions.
+
+    :param all: A list of 3-tuples containing all known true triples
+    :return:
+    """
+    heads, tails = {(p, o) : [] for _, p, o in all}, {(s, p) : [] for s, p, _ in all}
+
+    for s, p, o in all:
+        heads[p, o].append(s)
+        tails[s, p].append(o)
+
+    return heads, tails
+
+
 def eval_simple(model : nn.Module, valset, alltriples, n, hitsat=[1, 3, 10], filter_candidates=True, verbose=False):
     """
-    A simple and slow implementation
+    A simple and slow implementation of link prediction eval.
     :param model:
     :param valset:
     :param alltriples:
@@ -40,7 +83,7 @@ def eval_simple(model : nn.Module, valset, alltriples, n, hitsat=[1, 3, 10], fil
 
     ranks = []
 
-    for tail in [True, False]:  # head or tail prediction
+    for tail in [False, True]:  # head or tail prediction
 
         for i, (s, p, o) in enumerate(tqdm.tqdm(valset) if verbose else valset):
 
@@ -69,6 +112,8 @@ def eval_simple(model : nn.Module, valset, alltriples, n, hitsat=[1, 3, 10], fil
 
             ranks.append(rank)
 
+    print(ranks)
+
     mrr = sum([1.0/rank for rank in ranks])/len(ranks)
 
     hits = []
@@ -76,6 +121,7 @@ def eval_simple(model : nn.Module, valset, alltriples, n, hitsat=[1, 3, 10], fil
         hits.append(sum([1.0 if rank <= k else 0.0 for rank in ranks]) / len(ranks))
 
     return mrr, tuple(hits), ranks
+
 
 def eval(model : nn.Module, valset, alltriples, n, batch_size=16, hitsat=[1, 3, 10], filter_candidates=True, verbose=False):
     """
@@ -102,7 +148,7 @@ def eval(model : nn.Module, valset, alltriples, n, batch_size=16, hitsat=[1, 3, 
     itest = 0
 
     tic()
-    for tail in [True, False]:  # head or tail prediction
+    for tail in [False, True]:  # head or tail prediction
 
         for i, (s, p, o) in enumerate(tqdm.tqdm(valset) if verbose else valset):
 
@@ -172,6 +218,64 @@ def eval(model : nn.Module, valset, alltriples, n, batch_size=16, hitsat=[1, 3, 
 
     if verbose:
         print(f'time {toc():.2}s total, {tforward:.2}s forward, {tsort:.2}s processing')
+
+    return mrr, tuple(hits), ranks
+
+def eval_batch(model : nn.Module, valset, truedicts, n, batch_size=16, hitsat=[1, 3, 10], filter_candidates=True, verbose=False):
+    """
+    Evaluates a triple scoring model. Does the sorting in a single, GPU-accelerated operation.
+
+    :param model:
+    :param val_set:
+    :param alltriples:
+    :param filter:
+    :return:
+    """
+
+    heads, tails = truedicts
+
+    ranks = []
+    for head in [True, False]:  # head or tail prediction
+
+        for fr in range(0, len(valset), batch_size):
+            to = min(fr + batch_size, len(valset))
+
+            batch = valset[fr:to, :]
+            bn, _ = batch.size()
+
+            # compute the full score matrix (filter later)
+            bases   = batch[:, 1:] if head else batch[:, :2]
+            targets = batch[:, 0]  if head else batch[:, 2]
+
+            # collect the triples for which to compute scores
+            bexp = bases.view(bn, 1, 2).expand(bn, n, 2)
+            ar   = torch.arange(n, device=d()).view(1, n, 1).expand(bn, n, 1)
+            toscore = torch.cat([ar, bexp] if head else [bexp, ar], dim=2)
+            assert toscore.size() == (bn, n, 3)
+
+            scores = model(toscore)
+            assert scores.size() == (bn, n)
+
+            # filter out the true triples that aren't the target
+            filter_scores_(scores, batch, truedicts, head=head)
+
+            _, indices = torch.sort(scores,  dim=1, descending=True)
+            _, indices = torch.sort(indices, dim=1)
+            # -- Sorting the indices, and retrieving the indices of that sort gives us the rank of each target in the sorting
+
+            branks = indices[torch.arange(bn, device=d()), targets]
+            ranks.extend((branks + 1).tolist())
+
+    print(ranks)
+
+    mrr = sum([1.0/rank for rank in ranks])/len(ranks)
+
+    hits = []
+    for k in hitsat:
+        hits.append(sum([1.0 if rank <= k else 0.0 for rank in ranks]) / len(ranks))
+    #
+    # if verbose:
+    #     print(f'time {toc():.2}s total, {tforward:.2}s forward, {tsort:.2}s processing')
 
     return mrr, tuple(hits), ranks
 

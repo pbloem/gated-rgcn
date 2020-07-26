@@ -102,6 +102,8 @@ def go(arg):
 
         alltriples.add((s, p, o))
 
+    truedicts = util.truedicts(alltriples)
+
     if arg.final:
         train, test = torch.cat([train, val], dim=0), test
     else:
@@ -247,8 +249,8 @@ def go(arg):
                     else:
                         testsub = test[random.sample(range(test.size(0)), k=arg.eval_size)]
 
-                    mrr, hits, ranks = util.eval(
-                        model=model, valset=testsub, alltriples=alltriples, n=len(i2n),
+                    mrr, hits, ranks = util.eval_batch(
+                        model=model, valset=testsub, truedicts=truedicts, n=len(i2n),
                         batch_size=arg.test_batch, verbose=True)
 
                     if arg.check_simple:
