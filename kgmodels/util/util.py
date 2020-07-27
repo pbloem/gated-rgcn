@@ -225,6 +225,8 @@ def eval_batch(model : nn.Module, valset, truedicts, n, batch_size=16, hitsat=[1
     """
     Evaluates a triple scoring model. Does the sorting in a single, GPU-accelerated operation.
 
+    TODO: rank ties properly
+
     :param model:
     :param val_set:
     :param alltriples:

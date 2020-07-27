@@ -214,9 +214,9 @@ def go(arg):
                 out = model(triples)
 
                 if arg.loss == 'bce':
-                    loss = F.binary_cross_entropy_with_logits(out, labels, weight=weight, reduction='sum')
+                    loss = F.binary_cross_entropy_with_logits(out, labels, weight=weight, reduction=arg.lred)
                 elif arg.loss == 'ce':
-                    loss = F.cross_entropy(out, labels, reduction='sum')
+                    loss = F.cross_entropy(out, labels, reduction=arg.lred)
 
                 if arg.reg_eweight is not None:
                     loss = loss + model.penalty(which='entities', p=arg.reg_exp, rweight=arg.reg_eweight)
@@ -422,6 +422,11 @@ if __name__ == "__main__":
                         dest="patience",
                         help="Plateau scheduler patience.",
                         default=1, type=float)
+
+    parser.add_argument("--loss-reduction",
+                        dest="lred",
+                        help="How to reduce the loss along the batch dimension (sum, mean).",
+                        default='sum', type=str)
 
     parser.add_argument("--nweight",
                         dest="nweight",
