@@ -70,6 +70,9 @@ def truedicts(all):
 def eval_simple(model : nn.Module, valset, alltriples, n, hitsat=[1, 3, 10], filter_candidates=True, verbose=False):
     """
     A simple and slow implementation of link prediction eval.
+
+    NB Does not break ties properly (use eval_batch)
+
     :param model:
     :param valset:
     :param alltriples:
@@ -126,6 +129,8 @@ def eval_simple(model : nn.Module, valset, alltriples, n, hitsat=[1, 3, 10], fil
 def eval(model : nn.Module, valset, alltriples, n, batch_size=16, hitsat=[1, 3, 10], filter_candidates=True, verbose=False):
     """
     Evaluates a triple scoring model.
+
+    NB Does not break ties properly (use eval_batch)
 
     :param model:
     :param val_set:
@@ -270,13 +275,24 @@ def eval_batch(model : nn.Module, valset, truedicts, n, batch_size=16, hitsat=[1
             filter_scores_(scores, batch, truedicts, head=head)
             tfilter += toc()
 
-            tic()
-            _, indices = torch.sort(scores,  dim=1, descending=True)
-            _, indices = torch.sort(indices, dim=1)
-            tsort += toc()
-            # -- Sorting the indices, and retrieving the indices of that sort gives us the rank of each target in the sorting
+            # old way
+            # tic()
+            # _, indices = torch.sort(scores,  dim=1, descending=True)
+            # _, indices = torch.sort(indices, dim=1)
+            # tsort += toc()
+            # # -- Sorting the indices, and retrieving the indices of that sort gives us the rank of each target in the sorting
+            #
+            # branks = indices[torch.arange(bn, device=d()), targets]
 
-            branks = indices[torch.arange(bn, device=d()), targets]
+            true_scores = scores[torch.arange(bn, device=d()), targets]
+
+            raw_ranks = torch.sum(scores > true_scores.view(bn, 1), dim=1, dtype=torch.long)
+            # -- This is the "optimistic" rank (assuming it's sorted to the front of the ties)
+            num_ties = torch.sum(scores == true_scores.view(bn, 1), dim=1, dtype=torch.long)
+
+            # Accoutn for ties (put the true example halfway down the ties)
+            branks = raw_ranks + (num_ties - 1) // 2
+
             ranks.extend((branks + 1).tolist())
 
     mrr = sum([1.0/rank for rank in ranks])/len(ranks)
