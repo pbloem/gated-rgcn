@@ -146,6 +146,145 @@ class RGCNClassic(nn.Module):
 
         return self.comps1.pow(p).sum() + self.bases1.pow(p).sum()
 
+class LGCN(nn.Module):
+    """
+    Latent relational graph convolution. Blows up the relational edges, to boost overparametrization, and hopefully
+    to create lottery ticket effects.
+
+    Note that even if rp < r there might be such effects, since _all_ latent relations connect nodes that are originally
+    connected.
+
+    """
+
+    def __init__(self, triples, n, numcls, emb=16, bases=None, rp=16):
+
+        super().__init__()
+
+        self.emb = emb
+        self.bases = bases
+        self.numcls = numcls
+
+        r = len({p for _, p, _ in triples})
+
+        # Compute the (non-relational) index pairs of connected edges, and a dense matrix of n-hot encodings of the relations)
+        indices = list({(s, o) for (s, _, o) in triples})
+        p2i = {(s, o): i for i, (s, o) in enumerate(indices)}
+        indices = torch.tensor(indices, dtype=torch.long)
+        nt, _ = indices.size()
+
+        # Compute indices for the horizontally and vertically stacked adjacency matrices.
+        # -- All edges have all relations, so we just take the indices above and repeat them a bunch of times
+        s, o = indices[:, 0][None, :], indices[:, 1][None, :]
+        rm = torch.arange(rp)[:, None] # relation multiplier
+        se, oe = (s * rm).reshape(-1, 1), (o * rm).reshape(-1, 1)
+        # -- indices multiplied by relation
+        s, o = s.expand(rp, nt).reshape(-1, 1), o.expand(rp, nt).reshape(-1, 1)
+
+        self.register_buffer('hindices', torch.cat([s, oe], dim=1))
+        self.register_buffer('vindices', torch.cat([se, o], dim=1))
+
+        self.register_buffer('nhots', torch.zeros(nt, r))
+        for s, p, o in triples:
+            self.nhots[p2i[(s, o)], p] = 1
+        # -- filling a torch tensor this way is pretty slow. Might be better to start with a python list
+
+        # maps relations to latent relations (one per layer)
+        self.to_latent1 = nn.Linear(r, rp)
+        self.to_latent2 = nn.Linear(r, rp)
+
+        self.rp , self.r, self.n, self.nt = rp, r, n, nt
+
+        # layer 1 weights
+        if bases is None:
+            self.weights1 = nn.Parameter(torch.FloatTensor(rp, n, emb))
+            nn.init.xavier_uniform_(self.weights1, gain=nn.init.calculate_gain('relu'))
+
+            self.bases1 = None
+        else:
+            self.comps1 = nn.Parameter(torch.FloatTensor(rp, bases))
+            nn.init.xavier_uniform_(self.comps1, gain=nn.init.calculate_gain('relu'))
+
+            self.bases1 = nn.Parameter(torch.FloatTensor(bases, n, emb))
+            nn.init.xavier_uniform_(self.bases1, gain=nn.init.calculate_gain('relu'))
+
+        # layer 2 weights
+        if bases is None:
+            self.weights2 = nn.Parameter(torch.FloatTensor(rp, emb, numcls) )
+            nn.init.xavier_uniform_(self.weights2, gain=nn.init.calculate_gain('relu'))
+
+            self.bases2 = None
+        else:
+            self.comps2 = nn.Parameter(torch.FloatTensor(rp, bases))
+            nn.init.xavier_uniform_(self.comps2, gain=nn.init.calculate_gain('relu'))
+
+            self.bases2 = nn.Parameter(torch.FloatTensor(bases, emb, numcls))
+            nn.init.xavier_uniform_(self.bases2, gain=nn.init.calculate_gain('relu'))
+
+        self.bias1 = nn.Parameter(torch.FloatTensor(emb).zero_())
+        self.bias2 = nn.Parameter(torch.FloatTensor(numcls).zero_())
+
+    def forward(self):
+
+        rp, r, n, nt = self.rp, self.r, self.n, self.nt
+
+        latents1 = self.to_latent1(self.nhots)
+        latents1 = latents1.t().reshape(-1)
+
+        assert self.hindices.size(0) == latents1.size(0), f'{self.indices.size()} {latents1.size()}'
+
+        ## Layer 1
+        e = self.emb
+        b, c = self.bases, self.numcls
+
+        if self.bases1 is not None:
+            # weights = torch.einsum('rb, bij -> rij', self.comps1, self.bases1)
+            weights = torch.mm(self.comps1, self.bases1.view(b, n*e)).view(rp, n, e)
+        else:
+            weights = self.weights1
+
+        assert weights.size() == (rp, n, e)
+
+        # Apply weights and sum over relations
+        # h = torch.mm(hor_graph, )
+        h = util.spmm(indices=self.hindices, values=latents1, size=(n, n * rp), xmatrix=weights.view(rp*n, e))
+        assert h.size() == (n, e)
+
+        h = F.relu(h + self.bias1)
+
+        ## Layer 2
+
+        latents2 = self.to_latent2(self.nhots)
+        latents2 = latents1.t().reshape(-1)
+
+        # Multiply adjacencies by hidden
+        # h = torch.mm(ver_graph, h) # sparse mm
+        h = util.spmm(indices=self.vindices, values=latents2, size=(n * rp, n), xmatrix=h)
+
+        h = h.view(rp, n, e) # new dim for the relations
+
+        if self.bases2 is not None:
+            # weights = torch.einsum('rb, bij -> rij', self.comps2, self.bases2)
+            weights = torch.mm(self.comps2, self.bases2.view(b, e * c)).view(rp, e, c)
+        else:
+            weights = self.weights2
+
+        # Apply weights, sum over relations
+        h = torch.einsum('rhc, rnh -> nc', weights, h)
+        # h = torch.bmm(h, weights).sum(dim=0)
+
+        assert h.size() == (n, c)
+
+        return h + self.bias2 #-- softmax is applied in the loss
+
+    def penalty(self, p=2):
+
+        assert p==2
+
+        if self.bases is None:
+            return self.weights1.pow(2).sum()
+
+        return self.comps1.pow(p).sum() + self.bases1.pow(p).sum()
+
 
 class RGCNEmb(nn.Module):
     """

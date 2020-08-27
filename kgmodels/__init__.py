@@ -1,4 +1,4 @@
-from .models import GraphBlock, NodeClassifier, RGCNClassic, RGCNEmb, RGCNWeighted
+from .models import GraphBlock, NodeClassifier, RGCNClassic, RGCNEmb, RGCNWeighted, LGCN
 
 from .lpmodels import RGCNLayer, LinkPrediction, LPNarrow, LPShallow
 

@@ -110,6 +110,8 @@ def go(arg):
             model = kgmodels.RGCNClassic(edges=edges, n=N, numcls=num_cls, emb=arg.emb, bases=arg.bases, softmax=arg.softmax)
         elif arg.mixer == 'emb':
             model = kgmodels.RGCNEmb(edges=edges, n=N, numcls=num_cls, emb=arg.emb1, h=arg.emb, bases=arg.bases, separate_emb=arg.sep_emb)
+        elif arg.mixer == 'lgcn':
+            model = kgmodels.LGCN(triples=util.triples(edges), n=N, rp=arg.latents, numcls=num_cls, emb=arg.emb1, bases=arg.bases)
         elif arg.mixer == 'weighted':
             model = kgmodels.RGCNWeighted(edges=edges, n=N, numcls=num_cls, emb=arg.emb1, h=arg.emb, bases=arg.bases,
                                      separate_emb=arg.sep_emb, indep=arg.indep, sample=arg.sample)
@@ -309,6 +311,11 @@ if __name__ == "__main__":
                         dest="fdiff",
                         help="Amount of diffusion in the fan graph.",
                         default=5, type=int)
+
+    parser.add_argument("--latents",
+                        dest="latents",
+                        help="Number of latent relations in the LGCN.",
+                        default=None, type=int)
 
     parser.add_argument("--l1",
                         dest="l1",

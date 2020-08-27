@@ -342,6 +342,19 @@ def here(subpath=None):
 
     return os.path.abspath(os.path.join(os.path.dirname(__file__), '../..', subpath))
 
+def triples(edges):
+    """
+    Converts a kg in edge format to a kg in triple format.
+    :param edges:
+    :return:
+    """
+
+    res = []
+    for p, (sl, ol) in edges.items():
+        res.extend([(s, p, o) for (s, o) in zip(sl, ol)])
+
+    return res
+
 def adj(edges, num_nodes, cuda=False, vertical=True):
     """
     Computes a sparse adjacency matrix for the given graph (the adjacency matrices of all
