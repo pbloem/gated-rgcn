@@ -233,6 +233,9 @@ class LGCN(nn.Module):
         latents1 = torch.softmax(latents1, dim=1)
         latents1 = latents1.t().reshape(-1)
 
+        # column normalize
+        latents1 = latents1 / util.sum_sparse(self.hindices, latents1, (n, n * rp), row=False)
+
         assert self.hindices.size(0) == latents1.size(0), f'{self.indices.size()} {latents1.size()}'
 
         ## Layer 1
@@ -261,6 +264,9 @@ class LGCN(nn.Module):
         latents2 = torch.softmax(latents2, dim=1)
         latents2 = latents2.t().reshape(-1)
         # latents2 = LACT(latents2)
+
+        # row normalize
+        latents2 = latents2 / util.sum_sparse(self.vindices, latents2, (n * rp, n), row=True)
 
         # Multiply adjacencies by hidden
         # h = torch.mm(ver_graph, h) # sparse mm
