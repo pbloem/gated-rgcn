@@ -224,10 +224,13 @@ class LGCN(nn.Module):
         self.bias2 = nn.Parameter(torch.FloatTensor(numcls).zero_())
 
     def forward(self):
+        LACT = torch.relu
 
         rp, r, n, nt = self.rp, self.r, self.n, self.nt
 
         latents1 = self.to_latent1(self.nhots)
+        assert latents1.size() == (nt, rp)
+        latents1 = torch.softmax(latents1, dim=1)
         latents1 = latents1.t().reshape(-1)
 
         assert self.hindices.size(0) == latents1.size(0), f'{self.indices.size()} {latents1.size()}'
@@ -254,7 +257,10 @@ class LGCN(nn.Module):
         ## Layer 2
 
         latents2 = self.to_latent2(self.nhots)
-        latents2 = latents1.t().reshape(-1)
+        assert latents2.size() == (nt, rp)
+        latents2 = torch.softmax(latents2, dim=1)
+        latents2 = latents2.t().reshape(-1)
+        # latents2 = LACT(latents2)
 
         # Multiply adjacencies by hidden
         # h = torch.mm(ver_graph, h) # sparse mm
