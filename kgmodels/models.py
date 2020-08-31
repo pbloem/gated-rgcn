@@ -191,9 +191,11 @@ class LGCN(nn.Module):
         # maps relations to latent relations (one per layer)
         self.to_latent1 = nn.Sequential(
             nn.Linear(r, rp*4), nn.ReLU(),
+            nn.Linear(rp*4, rp * 4), nn.ReLU(),
             nn.Linear(rp*4, rp))
         self.to_latent2 = nn.Sequential(
             nn.Linear(r, rp*4), nn.ReLU(),
+            nn.Linear(rp * 4, rp * 4), nn.ReLU(),
             nn.Linear(rp*4, rp))
 
         self.rp , self.r, self.n, self.nt = rp, r, n, nt
