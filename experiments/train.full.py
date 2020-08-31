@@ -111,7 +111,8 @@ def go(arg):
         elif arg.mixer == 'emb':
             model = kgmodels.RGCNEmb(edges=edges, n=N, numcls=num_cls, emb=arg.emb1, h=arg.emb, bases=arg.bases, separate_emb=arg.sep_emb)
         elif arg.mixer == 'lgcn':
-            model = kgmodels.LGCN(triples=util.triples(edges), n=N, rp=arg.latents, numcls=num_cls, emb=arg.emb1, bases=arg.bases)
+            model = kgmodels.LGCN(triples=util.triples(edges), n=N, rp=arg.latents, numcls=num_cls, emb=arg.emb1,
+                                  ldepth=arg.latent_depth, lwidth=arg.latent_width, bases=arg.bases)
         elif arg.mixer == 'weighted':
             model = kgmodels.RGCNWeighted(edges=edges, n=N, numcls=num_cls, emb=arg.emb1, h=arg.emb, bases=arg.bases,
                                      separate_emb=arg.sep_emb, indep=arg.indep, sample=arg.sample)
@@ -316,6 +317,17 @@ if __name__ == "__main__":
                         dest="latents",
                         help="Number of latent relations in the LGCN.",
                         default=None, type=int)
+
+    parser.add_argument("--latent-depth",
+                        dest="latent_depth",
+                        help="Number of hidden layers in the latent MLP.",
+                        default=0, type=int)
+
+    parser.add_argument("--latent-width",
+                        dest="latent_width",
+                        help="Number of hidden units in the hidden layers of the  MLP.",
+                        default=128, type=int)
+
 
     parser.add_argument("--l1",
                         dest="l1",

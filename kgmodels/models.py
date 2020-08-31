@@ -156,7 +156,7 @@ class LGCN(nn.Module):
 
     """
 
-    def __init__(self, triples, n, numcls, emb=16, bases=None, rp=16):
+    def __init__(self, triples, n, numcls, emb=16, bases=None, rp=16, ldepth=0, lwidth=64):
 
         super().__init__()
 
@@ -189,14 +189,29 @@ class LGCN(nn.Module):
         # -- filling a torch tensor this way is pretty slow. Might be better to start with a python list
 
         # maps relations to latent relations (one per layer)
-        self.to_latent1 = nn.Sequential(
-            nn.Linear(r, rp*4), nn.ReLU(),
-            nn.Linear(rp*4, rp * 4), nn.ReLU(),
-            nn.Linear(rp*4, rp))
-        self.to_latent2 = nn.Sequential(
-            nn.Linear(r, rp*4), nn.ReLU(),
-            nn.Linear(rp * 4, rp * 4), nn.ReLU(),
-            nn.Linear(rp*4, rp))
+        to_latent1, to_latent2 = [], []
+
+        if ldepth == 0:
+            to_latent1 = nn.Linear(r, rp)
+            to_latent2 = nn.Linear(r, rp)
+        else:
+            to_latent1 = [nn.Linear(r, lwidth)]
+            to_latent2 = [nn.Linear(r, lwidth)]
+            for _ in range(ldepth - 1):
+                to_latent1.append(nn.ReLU())
+                to_latent2.append(nn.ReLU())
+
+                to_latent1.append(nn.Linear(lwidth, lwidth))
+                to_latent2.append(nn.Linear(lwidth, lwidth))
+
+            to_latent1.append(nn.ReLU())
+            to_latent2.append(nn.ReLU())
+
+            to_latent1.append(nn.Linear(lwidth, rp))
+            to_latent2.append(nn.Linear(lwidth, rp))
+
+        self.to_latent1 = nn.Sequential(*to_latent1)
+        self.to_latent2 = nn.Sequential(*to_latent2)
 
         self.rp , self.r, self.n, self.nt = rp, r, n, nt
 
