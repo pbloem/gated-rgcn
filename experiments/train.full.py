@@ -24,6 +24,8 @@ import matplotlib as mpl
 mpl.use('Agg')
 import matplotlib.pyplot as plt
 
+import kgbench as kg
+
 """
 Full batch training GAT and RGCN
 
@@ -47,6 +49,9 @@ def go(arg):
     train_accs = []
     test_accs = []
 
+    edges = triples = None
+    train = test = None
+
     if arg.name == 'random':
         edges, N, (train_idx, train_lbl), (test_idx, test_lbl) = \
             kgmodels.random_graph(base=arg.base, bgp0=arg.bgp0, bgp1=arg.bgp1)
@@ -64,11 +69,24 @@ def go(arg):
 
         # print(list(zip(* (edges[0]))) )
         # sys.exit()
+    elif arg.name in kg.names:
+        data = kg.load(arg.name, torch=True, prune_dist=arg.depth)
+
+        n2i,i2n = data.e2i, data.i2e
+        r2i, i2r = data.r2i, data.i2r
+
+        train_idx, train_lbl = data.training[:, 0], data.training[:, 1]
+        test_idx, test_lbl   = data.withheld[:, 0], data.withheld[:, 1]
+
+        triples = util.enrich(data.triples, n=len(i2n), r=len(i2r))
+        # -- enrich: add inverse links and self loops.
+
+        N = len(i2n)
+        num_cls = data.num_classes
 
     else:
         edges, (n2i, i2n), (r2i, i2r), train, test = \
             kgmodels.load(arg.name, final=arg.final, limit=arg.limit, bidir=True, prune=arg.prune)
-
 
         # Convert test and train to tensors
         train_idx = [n2i[name] for name, _ in train.items()]
@@ -91,28 +109,29 @@ def go(arg):
     print('some test set ids and labels', test_idx[:10], test_lbl[:10])
 
     tnodes = len(i2n)
-    totaledges = sum([len(x[0]) for _, x in edges.items()])
+    totaledges = sum([len(x[0]) for _, x in edges.items()]) if triples is None else triples.size(0)
 
     print(f'{tnodes} nodes')
-    print(f'{len(edges.keys())} relations')
+    print(f'{len(i2r)} relations')
     print(f'{totaledges} edges (including self loops and inverse)')
     print(f'{(totaledges-tnodes)//2} edges (originally)')
-    print(f'{len(train.keys())} training labels')
-    print(f'{len(test.keys())} test labels')
+    if train:
+        print(f'{len(train.keys())} training labels')
+        print(f'{len(test.keys())} test labels')
 
     for r in tqdm.trange(repeats) if repeats > 1 else range(repeats):
-
-
         """
         Define model
         """
         if arg.mixer == 'classic':
-            model = kgmodels.RGCNClassic(edges=edges, n=N, numcls=num_cls, emb=arg.emb, bases=arg.bases, softmax=arg.softmax)
+            model = kgmodels.RGCNClassic(edges=edges, n=N, numcls=num_cls, num_rels=len(i2r)*2+1, emb=arg.emb, bases=arg.bases, softmax=arg.softmax, triples=triples)
         elif arg.mixer == 'emb':
             model = kgmodels.RGCNEmb(edges=edges, n=N, numcls=num_cls, emb=arg.emb1, h=arg.emb, bases=arg.bases, separate_emb=arg.sep_emb)
         elif arg.mixer == 'lgcn':
-            model = kgmodels.LGCN(triples=util.triples(edges), n=N, rp=arg.latents, numcls=num_cls, emb=arg.emb1,
-                                  ldepth=arg.latent_depth, lwidth=arg.latent_width, bases=arg.bases)
+            model = kgmodels.LGCN(
+                triples=triples if triples is not None else util.triples(edges),
+                n=N, rp=arg.latents, numcls=num_cls, emb=arg.emb1,
+                ldepth=arg.latent_depth, lwidth=arg.latent_width, bases=arg.bases)
         elif arg.mixer == 'weighted':
             model = kgmodels.RGCNWeighted(edges=edges, n=N, numcls=num_cls, emb=arg.emb1, h=arg.emb, bases=arg.bases,
                                      separate_emb=arg.sep_emb, indep=arg.indep, sample=arg.sample)

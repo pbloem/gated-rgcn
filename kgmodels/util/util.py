@@ -345,6 +345,7 @@ def here(subpath=None):
 def triples(edges):
     """
     Converts a kg in edge format to a kg in triple format.
+
     :param edges:
     :return:
     """
@@ -354,6 +355,32 @@ def triples(edges):
         res.extend([(s, p, o) for (s, o) in zip(sl, ol)])
 
     return res
+
+def enrich(triples : torch.Tensor, n : int, r: int):
+    """
+    Adds inverse linkes and self loops to a KG in triple format.
+
+    :param triples:
+    :param n:
+    :param r:
+    :return:
+    """
+    cuda = triples.is_cuda
+
+    inverses = torch.cat([
+        triples[:, 2:],
+        triples[:, 1:2] + r,
+        triples[:, :1]
+    ], dim=1)
+
+    selfloops = torch.cat([
+        torch.arange(n, dtype=torch.long,  device=d(cuda))[:, None],
+        torch.full((n, 1), fill_value=2*r),
+        torch.arange(n, dtype=torch.long, device=d(cuda))[:, None],
+    ], dim=1)
+
+    return torch.cat([triples, inverses, selfloops], dim=0)
+
 
 def adj(edges, num_nodes, cuda=False, vertical=True):
     """

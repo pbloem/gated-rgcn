@@ -19,7 +19,7 @@ class RGCNClassic(nn.Module):
     Classic RGCN
     """
 
-    def __init__(self, edges, n, numcls, emb=16, bases=None, softmax=False):
+    def __init__(self, edges, n, numcls, emb=16, bases=None, softmax=False, triples=None, num_rels=None):
 
         super().__init__()
 
@@ -28,14 +28,20 @@ class RGCNClassic(nn.Module):
         self.numcls = numcls
         self.softmax = softmax
 
-        # horizontally and vertically stacked versions of the adjacency graph
-        hor_ind, hor_size = util.adj(edges, n, vertical=False)
-        ver_ind, ver_size = util.adj(edges, n, vertical=True)
+        assert (edges is None or triples is None), 'Pass graph as edges or triples, not both.'
+        assert (edges is not None or triples is not None), 'No graph passed.'
+
+        if edges is not None:
+
+            # horizontally and vertically stacked versions of the adjacency graph
+            hor_ind, hor_size = util.adj(edges, n, vertical=False)
+            ver_ind, ver_size = util.adj(edges, n, vertical=True)
+        else:
+            hor_ind, hor_size = util.adj_triples(triples, n, num_rels=num_rels, vertical=False)
+            ver_ind, ver_size = util.adj_triples(triples, n, num_rels=num_rels, vertical=True)
 
         _, rn = hor_size
         r = rn//n
-
-        t = len(edges[0][0])
 
         vals = torch.ones(ver_ind.size(0), dtype=torch.float)
         vals = vals / util.sum_sparse(ver_ind, vals, ver_size)
@@ -47,18 +53,6 @@ class RGCNClassic(nn.Module):
 
         ver_graph = torch.sparse.FloatTensor(indices=ver_ind.t(), values=vals, size=ver_size)
         self.register_buffer('ver_graph', ver_graph)
-
-        # res = torch.mm(torch.sparse.FloatTensor(indices=ver_ind.t(), values=torch.ones(ver_ind.size(0), dtype=torch.float), size=ver_size), torch.ones((n, 1), dtype=torch.float))
-        # print('.')
-        # res = res.data.numpy()
-        # n, bins, _ = plt.hist(res, bins =range(25) )
-        # print(bins)
-        # print(n)
-        # plt.yscale('log', nonposy='clip')
-        # plt.savefig('hist.png')
-        # print('.')
-        #
-        # sys.exit()
 
         # layer 1 weights
         if bases is None:
